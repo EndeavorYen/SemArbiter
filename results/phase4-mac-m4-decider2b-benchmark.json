@@ -1,0 +1,45 @@
+{
+  "benchmark": "Apple Silicon Mac mini M4 Physical Benchmark",
+  "timestamp": "2026-09-19T02:18:50+0800",
+  "hardware": {
+    "device": "Apple Silicon Mac mini",
+    "chip": "Apple M4 (10-Core CPU, Metal GPU)",
+    "architecture": "applegpu_g16g (UMA)",
+    "unified_ram_gb": 16.0,
+    "os": "Darwin 27.0.0 arm64"
+  },
+  "mlx_result": {
+    "framework": "Apple MLX Native (4-bit zero-copy)",
+    "model_id": "mlx-community/Qwen2.5-0.5B-Instruct-4bit",
+    "load_time_sec": 0.5635016250016633,
+    "resident_ram_mb": 268.13648223876953,
+    "peak_ram_mb": 367.9025421142578,
+    "p50_ms": 31.616082997061312,
+    "p90_ms": 31.66496729973005,
+    "p99_ms": 31.727625213679858,
+    "mean_ms": 31.592358399939258,
+    "min_ms": 31.287874997360632,
+    "max_ms": 31.735708005726337,
+    "std_ms": 0.09573232530436696,
+    "throughput_decisions_per_sec": 31.629471623443965
+  },
+  "mps_result": {
+    "framework": "PyTorch MPS (Metal GPU FP16)",
+    "model_id": "Mapika/decider-2b",
+    "load_time_sec": 78.61441829199612,
+    "process_rss_mb": 4760.75,
+    "p50_ms": 249.85431200184394,
+    "p90_ms": 250.2928871937911,
+    "p99_ms": 250.84976624682895,
+    "mean_ms": 249.654666648712,
+    "min_ms": 247.97220798791386,
+    "max_ms": 250.9322499972768,
+    "std_ms": 0.7034267197096353,
+    "throughput_decisions_per_sec": 4.002332367162108
+  },
+  "analysis": {
+    "speedup_mlx_vs_mps": 7.902759871457437,
+    "ram_savings_mb": 4392.847457885742,
+    "summary": "MLX zero-copy is 7.90x faster than PyTorch MPS on Mac mini M4 with lower RAM footprint."
+  }
+}
