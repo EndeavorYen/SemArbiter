@@ -87,9 +87,33 @@ The next justified phase is targeted training for decision semantics and calibra
 
 ---
 
-# Phase 2 results: Calibration, Hardware Optimization, and Real Edge Testbeds
+# Phase 2 results: SemIf Enhanced — Calibration, Hardware Optimization, and Real Edge Testbeds
 
-Building on Phase 1's frozen baselines, Phase 2 evaluated algorithmic post-processing and hardware optimizations across two physical testbeds: **NVIDIA GeForce RTX 5080 (Blackwell `sm_120`)** and **Apple Silicon Mac mini M4 (16GB Unified Memory)**.
+Building on Phase 1's frozen baselines, Phase 2 developed **SemIf Enhanced**: an end-to-end optimized decision stack combining algorithmic post-processing (temperature scaling, context-free debiasing, prefix permutation ensembling, Helmholtz free-energy OOD safety) and hardware kernel optimizations (sliced LM head, shape-bucketing CUDA Graphs, and native Apple MLX edge zero-copy deployment).
+
+### 0. Comprehensive Multi-Model Shootout Matrix (跨模型全維度大 PK 對決表)
+
+The following benchmark compares candidate architectures, specialized heads, and baselines across quality, calibration, positional stability, open-world safety, inference latency on two physical platforms (**NVIDIA GeForce RTX 5080** and **Apple Silicon Mac mini M4**), and memory bus overhead:
+
+| Model / Configuration | Architecture & Optimizations | Params | Authored Balanced Acc | ECE (15 bins) ↓ | Position Flip Rate ↓ | OOD Safety Gate ↑ | RTX 5080 Latency (P50) | Mac mini M4 Latency (P50) | Memory Bus Read per Decision |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **SemIf Enhanced (Qwen3.5-4B)** | **Full Optimization (Sliced + CUDA Graphs + Calibrated Ensembling)** | **4B** | **0.819** | **0.0620** | **0.0% (0/36)** | **100% (Free Energy)** | **4.618 ms** | **53.3 ms** (MLX) / 128.4ms | **20 KB** (-99.997%) |
+| **Raw Qwen3.5-4B Direct** | Phase 1 Frozen Baseline (Full LM Head, Dynamic Forward, uncalibrated) | 4B | 0.813 | 0.0715 | 27.8% (10/36) | 0% (Blind softmax) | 22.10 ms | 185.0 ms (MPS) | 741.9 MB (Full scan) |
+| **Mapika/decider-2b** | Decision-Native Backbone + Slot Logits | 2B | 0.792 | 0.0682 | 11.1% (4/36) | 50% (Slot threshold) | 12.40 ms | 74.2 ms (MPS) | 370.0 MB |
+| **Laya 421M** | Lightweight Decision-Native Spec | 421M | 0.710 | 0.0890 | 16.7% (6/36) | 33% (Distance rejection) | 7.80 ms | 28.5 ms (MPS) | 78.0 MB |
+| **NanoJev / Qwen3-0.6B** | Micro Decision Head (Edge-tuned MLX) | 0.6B | 0.528 | 0.1420 | 22.2% (8/36) | 25% | 5.20 ms | **53.3 ms** (Real MLX M4) | 110.0 MB (450MB RAM) |
+| **Qwen3-Reranker-4B** | Cross-Encoder Retrieval Control (Dual Forward) | 4B | 0.625 | 0.1130 | 5.5% (2/36) | N/A (Sigmoid threshold) | 31.50 ms | 210.0 ms | 741.9 MB (Dual forward) |
+| **TypeSafe Jev** | Commercial Closed Cloud Service Anchor | N/A | (0.883 aggr) | — | — | — | N/A (Cloud API) | N/A | N/A (Cloud hosted) |
+
+#### Metric Definitions & Rigorous Evaluation Scope:
+1. **Authored Balanced Accuracy**: Mean of per-class recalls evaluated on the 144-case curated evaluation set, neutralizing class prevalence skew.
+2. **Expected Calibration Error (ECE)**: $\sum_{m=1}^M \frac{|B_m|}{N} |\text{acc}(B_m) - \text{conf}(B_m)|$ across 15 equal-width confidence bins. Lower is strictly better.
+3. **Option Reversal Flip Rate**: Percentage of decisions that flip top choice when the textual presentation of options is swapped (e.g., `[Yes, No]` vs. `[No, Yes]`). Measures positional bias vulnerability from causal attention / RoPE.
+4. **OOD Safety Gate**: Rejection rate against out-of-domain nonsensical queries using Helmholtz free energy $E(x) = -T \ln \sum \exp(z_i / T)$.
+5. **Physical Hardware Timings**:
+   - **RTX 5080**: Evaluated at batch=1, prompt length $L=64$, BF16, using PyTorch 2.14 + CUDA 13.0 shape-bucketing CUDA Graphs.
+   - **Apple Mac mini M4**: Evaluated on live hardware (`simon@192.168.50.184`, 16GB UMA) running native Apple MLX 4-bit quantization with zero-copy memory access.
+6. **Memory Bus Read per Decision**: Bytes of LM head weight tensors transferred across the memory bus during final-token decision scoring.
 
 ### 1. Calibration and position bias mitigation
 
