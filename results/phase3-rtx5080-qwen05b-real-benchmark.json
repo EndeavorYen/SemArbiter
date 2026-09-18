@@ -1,0 +1,50 @@
+{
+  "benchmark": "RTX 5080 Physical Model Benchmark",
+  "timestamp": "2026-09-19T01:47:59+0800",
+  "hardware": {
+    "gpu": "NVIDIA GeForce RTX 5080",
+    "architecture": "Blackwell (sm_120)",
+    "cuda_version": "13.0",
+    "torch_version": "2.14.0+cu130",
+    "total_vram_gb": 15.92047119140625
+  },
+  "model": {
+    "model_id": "Qwen/Qwen2.5-0.5B",
+    "dtype": "bfloat16",
+    "prompt_length_tokens": 56,
+    "resident_vram_mb": 950.1669921875,
+    "peak_vram_mb": 1016.12890625
+  },
+  "measurements": {
+    "full_lm_head_dynamic": {
+      "p50_ms": 36.697086334228516,
+      "p90_ms": 39.227133178710936,
+      "p99_ms": 42.55695171356201,
+      "mean_ms": 36.9675471496582,
+      "min_ms": 34.45862579345703,
+      "max_ms": 43.146881103515625,
+      "std_ms": 1.764007530382576
+    },
+    "sliced_lm_head_dynamic": {
+      "p50_ms": 34.27163124084473,
+      "p90_ms": 36.81233291625976,
+      "p99_ms": 47.90511398315427,
+      "mean_ms": 35.015297927856444,
+      "min_ms": 31.919967651367188,
+      "max_ms": 54.22230529785156,
+      "std_ms": 3.1536041904801686
+    },
+    "sliced_cuda_graph": {
+      "p50_ms": 2.817088007926941,
+      "p90_ms": 2.8414336919784544,
+      "p99_ms": 3.0817061877250667,
+      "mean_ms": 2.832666244506836,
+      "min_ms": 2.7992639541625977,
+      "max_ms": 3.148063898086548,
+      "std_ms": 0.058418028420427294
+    },
+    "cuda_graph_supported": true,
+    "speedup_sliced_vs_full": 1.0707715100089297,
+    "speedup_graph_vs_full": 13.026602729828605
+  }
+}
