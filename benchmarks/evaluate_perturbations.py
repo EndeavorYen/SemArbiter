@@ -79,6 +79,7 @@ def main() -> None:
             report["variants"][variant] = {
                 "evaluation": evaluate.evaluate(variant_gold, [perturb[row["id"]] for row in variant_gold]),
                 "argmax_flips": len(flips),
+                "flip_rate": len(flips) / len(variant_gold) if variant_gold else 0.0,
                 "flip_rows": flips,
                 "mean_max_probability_movement": statistics.mean(shifts),
                 "max_probability_movement": max(shifts),
