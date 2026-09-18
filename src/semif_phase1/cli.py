@@ -10,6 +10,7 @@ from .core import load_causal_model, null_prompt_row, validate_row
 from .decider import DEFAULT_DECIDER_TEMPERATURE
 from .decider import score as decider_score
 from .direct import score as direct_score
+from .permutation import score_permuted
 from .reranker import score as reranker_score
 from .serial import SerialPrefixScorer
 from .shared import score_shared
@@ -25,6 +26,8 @@ def main() -> None:
     parser.add_argument("--max-tokens", type=int, default=4096)
     parser.add_argument("--temperature", type=float, default=None)
     parser.add_argument("--calibrate-prior", action="store_true", help="Estimate and subtract context-free prior logits")
+    parser.add_argument("--permute-ensemble", action="store_true", help="Ensemble over option order permutations to eliminate position bias")
+    parser.add_argument("--max-perms", type=int, default=2, help="Maximum number of permutations to evaluate per row")
     args = parser.parse_args()
     if args.output.exists() or args.max_tokens < 1:
         parser.error("Output must be new and max-tokens must be positive")
@@ -64,7 +67,28 @@ def main() -> None:
         elif args.mode == "direct":
             temp = args.temperature if args.temperature is not None else 1.0
             for row in rows:
-                destination.write(json.dumps(direct_score(model, tokenizer, row, metadata, args.max_tokens, temperature=temp, prior_logits=prior_logits), allow_nan=False) + "\n")
+                if args.permute_ensemble:
+                    res = score_permuted(
+                        model,
+                        tokenizer,
+                        row,
+                        metadata,
+                        args.max_tokens,
+                        temperature=temp,
+                        prior_logits=prior_logits,
+                        max_perms=args.max_perms,
+                    )
+                else:
+                    res = direct_score(
+                        model,
+                        tokenizer,
+                        row,
+                        metadata,
+                        args.max_tokens,
+                        temperature=temp,
+                        prior_logits=prior_logits,
+                    )
+                destination.write(json.dumps(res, allow_nan=False) + "\n")
                 destination.flush()
         else:
             for row in rows:
