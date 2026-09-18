@@ -30,6 +30,42 @@ def _forward(model, inputs):
     return model(**kwargs).logits[:, -1, :]
 
 
+def forward_restricted(model, inputs, slots: list[int]):
+    """Compute logits restricted strictly to slot token IDs, avoiding full-vocabulary projection.
+
+    If model exposes a base transformer (e.g., model.model or model.transformer)
+    and an lm_head Linear layer, extracts the final hidden state of the last token
+    and projects exclusively against the weight rows corresponding to candidate slots.
+    Otherwise, falls back cleanly to standard forward pass.
+    """
+    import torch
+    import torch.nn.functional as F
+
+    base_model = getattr(model, "model", None) or getattr(model, "transformer", None)
+    lm_head = getattr(model, "lm_head", None)
+
+    if base_model is not None and lm_head is not None and hasattr(lm_head, "weight"):
+        try:
+            base_out = base_model(**inputs, use_cache=False, return_dict=True)
+            last_hidden = getattr(base_out, "last_hidden_state", None)
+            if last_hidden is None and isinstance(base_out, (tuple, list)):
+                last_hidden = base_out[0]
+            if last_hidden is not None:
+                rep = last_hidden[:, -1, :]
+                slots_tensor = torch.as_tensor(slots, dtype=torch.long, device=rep.device)
+                sliced_weight = lm_head.weight[slots_tensor]
+                sliced_bias = None
+                if getattr(lm_head, "bias", None) is not None:
+                    sliced_bias = lm_head.bias[slots_tensor]
+                slot_logits = F.linear(rep, sliced_weight, sliced_bias)
+                return slot_logits[0], "native restricted lm_head projection to declared answer slots"
+        except Exception:
+            pass
+
+    vocabulary = _forward(model, inputs)[0]
+    return vocabulary[slots], "native full-vocabulary last-position logits restricted to declared answer slots"
+
+
 def encode_prompt(tokenizer, row: dict, max_tokens: int) -> tuple[list[int], list[int], str]:
     """Encode one decision and verify its single-token answer slots."""
     prompt = tokenizer.apply_chat_template(
@@ -53,6 +89,7 @@ def score(
     max_tokens: int = 4096,
     temperature: float = 1.0,
     prior_logits: list[float] | None = None,
+    sliced_head: bool = True,
 ) -> dict:
     import torch
 
@@ -67,10 +104,16 @@ def score(
         torch.cuda.synchronize(device)
     forward_start = time.perf_counter()
     with torch.inference_mode():
-        vocabulary = _forward(model, inputs)[0].float()
+        if sliced_head:
+            slot_tensor, readout = forward_restricted(model, inputs, slots)
+            selected = slot_tensor.float().cpu().tolist()
+        else:
+            vocabulary = _forward(model, inputs)[0].float()
+            selected = vocabulary[slots].cpu().tolist()
+            readout = "native full-vocabulary last-position logits restricted to declared answer slots"
     if device.type == "cuda":
         torch.cuda.synchronize(device)
-    selected = vocabulary[slots].cpu().tolist()
+
     if prior_logits is not None:
         calibrated_logits = apply_prior_calibration(selected, prior_logits[:len(selected)])
     else:
@@ -90,12 +133,13 @@ def score(
         "calibrated_logits": calibrated_logits,
         "temperature": temperature,
         "prior_debiased": prior_logits is not None,
+        "sliced_head": sliced_head,
         "input_tokens": len(ids),
         "forward_seconds": time.perf_counter() - forward_start,
         "total_seconds": time.perf_counter() - started,
         "prompt_sha256": prompt_hash,
         "prompt_version": PROMPT_VERSION,
         "model": metadata,
-        "readout": "native full-vocabulary last-position logits restricted to declared answer slots",
+        "readout": readout,
         "probability_status": status,
     }

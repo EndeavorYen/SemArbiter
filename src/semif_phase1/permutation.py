@@ -74,6 +74,7 @@ def score_permuted(
     temperature: float = 1.0,
     prior_logits: list[float] | None = None,
     max_perms: int = 2,
+    sliced_head: bool = True,
 ) -> dict:
     """Evaluate row over multiple option permutations and ensemble the results."""
     validate_row(row)
@@ -96,6 +97,7 @@ def score_permuted(
             max_tokens=max_tokens,
             temperature=temperature,
             prior_logits=prior_logits,
+            sliced_head=sliced_head,
         )
         total_forward_seconds += run_res["forward_seconds"]
         # run_res["option_logits"] is in variant_row slot order
