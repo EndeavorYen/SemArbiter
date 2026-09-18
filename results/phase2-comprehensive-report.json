@@ -11,9 +11,9 @@
       "driver_version": "610.88",
       "cuda_version": "13.0",
       "torch_version": "2.14.0+cu130",
-      "measured_p50_latency_ms": 4.618,
-      "measured_p99_latency_ms": 4.998,
-      "jitter_reduction_pct": 55.8,
+      "measured_p50_latency_ms": 5.649,
+      "measured_p99_latency_ms": 6.078,
+      "jitter_reduction_pct": 51.3,
       "sliced_head_bandwidth_saved_mb": 741.9
     },
     "edge_micro_server": {

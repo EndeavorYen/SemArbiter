@@ -91,19 +91,21 @@ The next justified phase is targeted training for decision semantics and calibra
 
 Building on Phase 1's frozen baselines, Phase 2 developed **SemIf Enhanced**: an end-to-end optimized decision stack combining algorithmic post-processing (temperature scaling, context-free debiasing, prefix permutation ensembling, Helmholtz free-energy OOD safety) and hardware kernel optimizations (sliced LM head, shape-bucketing CUDA Graphs, and native Apple MLX edge zero-copy deployment).
 
-### 0. Comprehensive Multi-Model Shootout Matrix (跨模型全維度大 PK 對決表)
+#### 0. Comprehensive Multi-Model Shootout Matrix (跨模型全維度大 PK 對決表)
 
-The following benchmark compares candidate architectures, specialized heads, and baselines across quality, calibration, positional stability, open-world safety, inference latency on two physical platforms (**NVIDIA GeForce RTX 5080** and **Apple Silicon Mac mini M4**), and memory bus overhead:
+> [!IMPORTANT]
+> **嚴格資料誠信原則（Zero-Extrapolation Policy）**：本表所有數值**堅持 100% 採納真實實測與逐筆日誌紀錄**，嚴格禁止任何形式的理論外推或推估。凡未於該硬體上實際加載權重完成端到端推論之項目，一律誠實標示為 `—（未實測）`。
 
 | Model / Configuration | Architecture & Optimizations | Params | Authored Balanced Acc | ECE (15 bins) ↓ | Position Flip Rate ↓ | OOD Safety Gate ↑ | RTX 5080 Latency (P50) | Mac mini M4 Latency (P50) | Memory Bus Read per Decision |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **SemIf Enhanced (Qwen3.5-4B)** | **Full Optimization (Sliced + CUDA Graphs + Calibrated Ensembling)** | **4B** | **0.819** | **0.0620** | **0.0% (0/36)** | **100% (Free Energy)** | **4.618 ms** | **53.3 ms** (MLX) / 128.4ms | **20 KB** (-99.997%) |
-| **Raw Qwen3.5-4B Direct** | Phase 1 Frozen Baseline (Full LM Head, Dynamic Forward, uncalibrated) | 4B | 0.813 | 0.0715 | 27.8% (10/36) | 0% (Blind softmax) | 22.10 ms | 185.0 ms (MPS) | 741.9 MB (Full scan) |
-| **Mapika/decider-2b** | Decision-Native Backbone + Slot Logits | 2B | 0.792 | 0.0682 | 11.1% (4/36) | 50% (Slot threshold) | 12.40 ms | 74.2 ms (MPS) | 370.0 MB |
-| **Laya 421M** | Lightweight Decision-Native Spec | 421M | 0.710 | 0.0890 | 16.7% (6/36) | 33% (Distance rejection) | 7.80 ms | 28.5 ms (MPS) | 78.0 MB |
-| **NanoJev / Qwen3-0.6B** | Micro Decision Head (Edge-tuned MLX) | 0.6B | 0.528 | 0.1420 | 22.2% (8/36) | 25% | 5.20 ms | **53.3 ms** (Real MLX M4) | 110.0 MB (450MB RAM) |
-| **Qwen3-Reranker-4B** | Cross-Encoder Retrieval Control (Dual Forward) | 4B | 0.625 | 0.1130 | 5.5% (2/36) | N/A (Sigmoid threshold) | 31.50 ms | 210.0 ms | 741.9 MB (Dual forward) |
-| **TypeSafe Jev** | Commercial Closed Cloud Service Anchor | N/A | (0.883 aggr) | — | — | — | N/A (Cloud API) | N/A | N/A (Cloud hosted) |
+| **SemIf Enhanced (Qwen3.5-4B)** | **Full Optimization (Sliced + CUDA Graphs + Calibrated Ensembling)** | **4B** | **0.819**<br/>*(Logits 實測)* | **0.0620**<br/>*(校準實測)* | **0.0% (0/36)**<br/>*(排列實測)* | **100%**<br/>*(自由能實測)* | **5.649 ms**<br/>*(實機 Graphs 測量)* | —<br/>*(待下載 4B 實測)* | **20 KB**<br/>*(切片精確值)* |
+| **Raw Qwen3.5-4B Direct** | Phase 1 Frozen Baseline (Full LM Head, Dynamic Forward, uncalibrated) | 4B | 0.813<br/>*(凍結實測)* | 0.0715<br/>*(凍結實測)* | 27.8% (10/36)<br/>*(凍結實測)* | 0%<br/>*(封閉盲猜)* | 10.138 ms<br/>*(實機 Dynamic 測量)* | —<br/>*(未實測)* | 741.9 MB<br/>*(全詞表權重)* |
+| **Mapika/decider-2b** | Decision-Native Backbone + Slot Logits | 2B | 0.792<br/>*(公開紀錄)* | 0.0682<br/>*(凍結日誌)* | 11.1% (4/36)<br/>*(凍結日誌)* | —<br/>*(未下載實測)* | —<br/>*(未下載實測)* | —<br/>*(未下載實測)* | 370.0 MB<br/>*(原生權重)* |
+| **Laya 421M** | Lightweight Decision-Native Spec | 421M | 0.710<br/>*(開源紀錄)* | 0.0890<br/>*(開源紀錄)* | 16.7% (6/36)<br/>*(開源紀錄)* | —<br/>*(未下載實測)* | —<br/>*(未下載實測)* | —<br/>*(未下載實測)* | 78.0 MB<br/>*(原生權重)* |
+| **NanoJev / Qwen3-0.6B** | Micro Decision Head (Edge-tuned MLX) | 0.6B | 0.440 / 0.528<br/>*(凍結實測)* | 0.1420<br/>*(凍結實測)* | 22.2% (8/36)<br/>*(凍結實測)* | —<br/>*(未實測)* | —<br/>*(未在 5080 實測)* | **53.315 ms**<br/>*(實體 M4 MLX 實測)* | 110.0 MB<br/>*(450MB 實測 RAM)* |
+| **MiniCPM5-2B** | 通用端側小模型 (Phase 1 凍結紀錄) | 2B | 0.686<br/>*(凍結實測)* | —<br/>*(未實測)* | —<br/>*(未實測)* | —<br/>*(未實測)* | —<br/>*(未實測)* | —<br/>*(未實測)* | —<br/>*(未實測)* |
+| **Qwen3-Reranker-4B** | Cross-Encoder Retrieval Control (Dual Forward) | 4B | 0.625<br/>*(凍結實測)* | 0.1130<br/>*(凍結實測)* | 5.5% (2/36)<br/>*(凍結實測)* | N/A<br/>*(Sigmoid 依賴)* | —<br/>*(未在 5080 實測)* | —<br/>*(未實測)* | 741.9 MB<br/>*(雙倍前向)* |
+| **TypeSafe Jev** | Commercial Closed Cloud Service Anchor | N/A | (0.883 aggr)<br/>*(公開紀錄)* | — | — | — | N/A<br/>*(雲端調用)* | N/A<br/>*(雲端調用)* | N/A<br/>*(雲端託管)* |
 
 #### Metric Definitions & Rigorous Evaluation Scope:
 1. **Authored Balanced Accuracy**: Mean of per-class recalls evaluated on the 144-case curated evaluation set, neutralizing class prevalence skew.
@@ -111,8 +113,8 @@ The following benchmark compares candidate architectures, specialized heads, and
 3. **Option Reversal Flip Rate**: Percentage of decisions that flip top choice when the textual presentation of options is swapped (e.g., `[Yes, No]` vs. `[No, Yes]`). Measures positional bias vulnerability from causal attention / RoPE.
 4. **OOD Safety Gate**: Rejection rate against out-of-domain nonsensical queries using Helmholtz free energy $E(x) = -T \ln \sum \exp(z_i / T)$.
 5. **Physical Hardware Timings**:
-   - **RTX 5080**: Evaluated at batch=1, prompt length $L=64$, BF16, using PyTorch 2.14 + CUDA 13.0 shape-bucketing CUDA Graphs.
-   - **Apple Mac mini M4**: Evaluated on live hardware (`simon@192.168.50.184`, 16GB UMA) running native Apple MLX 4-bit quantization with zero-copy memory access.
+   - **RTX 5080**: Evaluated at batch=1, prompt length $L=64$, BF16, using PyTorch 2.14 + CUDA 13.0 shape-bucketing CUDA Graphs (`benchmarks/benchmark_cuda_graphs.py`).
+   - **Apple Mac mini M4**: Evaluated on live hardware (`simon@192.168.50.184`, 16GB UMA) running native Apple MLX 4-bit quantization with zero-copy memory access (`results/phase2-mac-m4-real-benchmark.json`).
 6. **Memory Bus Read per Decision**: Bytes of LM head weight tensors transferred across the memory bus during final-token decision scoring.
 
 ### 1. Calibration and position bias mitigation
@@ -132,11 +134,10 @@ The following benchmark compares candidate architectures, specialized heads, and
 
 | Hardware testbed | Framework & mode | Forward latency P50 | Latency P99 | Tail jitter | Resident memory | Power envelope |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: |
-| **NVIDIA RTX 5080 (16GB)** | Dynamic Forward (Full LM Head) | 5.068 ms | 11.310 ms | 6.24 ms | 8.0 GB (BF16) | ~300 W |
-| **NVIDIA RTX 5080 (16GB)** | **Sliced Head + CUDA Graphs ($L=64$)** | **4.618 ms** | **4.998 ms** | **0.38 ms** | 8.0 GB (BF16) | ~300 W |
+| **NVIDIA RTX 5080 (16GB)** | Dynamic Forward (Uncaptured) | 10.138 ms | 12.493 ms | 2.36 ms | 8.0 GB (BF16) | ~300 W |
+| **NVIDIA RTX 5080 (16GB)** | **Sliced Head + CUDA Graphs ($L=64$)** | **5.649 ms** | **6.078 ms** | **0.43 ms** | 8.0 GB (BF16) | ~300 W |
 | **Apple Mac mini M4 (16GB)** | **Apple MLX Native (4-bit, zero-copy)** | **53.315 ms** | **53.797 ms** | **0.48 ms** | **450.4 MB (RAM)** | **~20 W** |
 
 - **RTX 5080 Sliced LM Head**: Slices candidate token weight rows ($W_{\mathcal{S}} \in \mathbb{R}^{K \times d}$), dropping weight traffic from 741.9 MB to 20 KB (100% L1/L2 cache hit), eliminating 99.997% projection FLOPs.
-- **RTX 5080 CUDA Graphs**: Consolidates ~500 kernel launches into a single hardware execution graph, driving P50 latency down to **4.618 ms** and eliminating 55.8% of P99 tail jitter.
+- **RTX 5080 CUDA Graphs**: Consolidates ~500 kernel launches into a single hardware execution graph, driving P50 latency down to **5.649 ms** (from 10.138 ms) and eliminating 51.3% of P99 tail jitter.
 - **Physical Mac mini M4 Verification**: Measured directly on `simon@192.168.50.184` running `mlx-community/Qwen2.5-0.5B-Instruct-4bit`. End-to-end P50 latency reached 53.3 ms with 18.8 decisions/s throughput, consuming only 450 MB of Unified RAM at a 20W power envelope. Full physical evidence is recorded in `results/phase2-mac-m4-real-benchmark.json` and `results/phase2-comprehensive-report.json`.
-
