@@ -90,8 +90,10 @@ def score(
     temperature: float = 1.0,
     prior_logits: list[float] | None = None,
     sliced_head: bool = True,
+    graph_runner: Any = None,
 ) -> dict:
     import torch
+    import torch.nn.functional as F
 
     started = time.perf_counter()
     ids, slots, prompt_hash = encode_prompt(tokenizer, row, max_tokens)
@@ -104,7 +106,21 @@ def score(
         torch.cuda.synchronize(device)
     forward_start = time.perf_counter()
     with torch.inference_mode():
-        if sliced_head:
+        if graph_runner is not None and getattr(device, "type", str(device)) == "cuda":
+            last_hidden, bucket_used, was_replayed = graph_runner.forward_hidden(ids)
+            slots_tensor = torch.as_tensor(slots, dtype=torch.long, device=last_hidden.device)
+            lm_head = getattr(model, "lm_head", None)
+            if lm_head is not None and hasattr(lm_head, "weight"):
+                sliced_weight = lm_head.weight[slots_tensor]
+                sliced_bias = lm_head.bias[slots_tensor] if getattr(lm_head, "bias", None) is not None else None
+                slot_logits = F.linear(last_hidden, sliced_weight, sliced_bias)
+                selected = slot_logits[0].float().cpu().tolist()
+                readout = f"cuda-graph-bucket-{bucket_used} restricted lm_head projection" if was_replayed else "native restricted lm_head projection to declared answer slots"
+            else:
+                vocabulary = _forward(model, inputs)[0].float()
+                selected = vocabulary[slots].cpu().tolist()
+                readout = "native full-vocabulary last-position logits restricted to declared answer slots"
+        elif sliced_head:
             slot_tensor, readout = forward_restricted(model, inputs, slots)
             selected = slot_tensor.float().cpu().tolist()
         else:
@@ -134,6 +150,7 @@ def score(
         "temperature": temperature,
         "prior_debiased": prior_logits is not None,
         "sliced_head": sliced_head,
+        "cuda_graph": graph_runner is not None,
         "input_tokens": len(ids),
         "forward_seconds": time.perf_counter() - forward_start,
         "total_seconds": time.perf_counter() - started,

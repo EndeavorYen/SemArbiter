@@ -32,8 +32,9 @@ class MockModel:
         self.logits_dict = logits_dict
 
     def parameters(self):
+        import torch
         class Param:
-            device = type("Device", (), {"type": "cpu"})()
+            device = torch.device("cpu")
 
         yield Param()
 

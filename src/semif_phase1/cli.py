@@ -33,6 +33,7 @@ def main() -> None:
     parser.add_argument("--min-confidence", type=float, default=0.5, help="Minimum confidence threshold for automatic decisions")
     parser.add_argument("--energy-threshold", type=float, default=None, help="Maximum Helmholtz free energy threshold for OOD rejection")
     parser.add_argument("--sliced-head", action=argparse.BooleanOptionalAction, default=True, help="Use restricted sliced LM head projection to avoid full vocabulary calculation")
+    parser.add_argument("--cuda-graph", action="store_true", help="Use shape-bucketed CUDA Graphs for sub-10ms latency on CUDA GPUs")
     args = parser.parse_args()
     if args.output.exists() or args.max_tokens < 1:
         parser.error("Output must be new and max-tokens must be positive")
@@ -42,6 +43,12 @@ def main() -> None:
     for row in rows:
         validate_row(row)
     model, tokenizer, metadata = load_causal_model(args.model, args.revision)
+
+    graph_runner = None
+    if args.cuda_graph and args.mode == "direct":
+        from .cuda_graph import BucketGraphRunner
+        device = next(model.parameters()).device
+        graph_runner = BucketGraphRunner(model, device=device)
     
     prior_logits = None
     if args.calibrate_prior and args.mode in ("direct", "decider"):
@@ -107,6 +114,7 @@ def main() -> None:
                         temperature=temp,
                         prior_logits=prior_logits,
                         sliced_head=args.sliced_head,
+                        graph_runner=graph_runner,
                     )
                 destination.write(json.dumps(maybe_gate(res), allow_nan=False) + "\n")
                 destination.flush()
