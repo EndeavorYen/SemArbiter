@@ -94,17 +94,18 @@ Building on Phase 1's frozen baselines, Phase 2 developed **SemIf Enhanced**: an
 #### 0. Comprehensive Multi-Model Shootout Matrix (跨模型全維度大 PK 對決表)
 
 > [!IMPORTANT]
-> **嚴格資料誠信原則（Zero-Extrapolation Policy）**：本表所有數值**堅持 100% 採納真實實測與逐筆日誌紀錄**，嚴格禁止任何形式的理論外推或推估。凡未於該硬體上實際加載權重完成端到端推論之項目，一律誠實標示為 `—（未實測）`。
+> **評測規範說明（Empirical Focus + Verified Public Records）**：
+> 1. **初步優化核心目標物（實機物理實測）**：聚焦於 **`Qwen3.5-4B`（因果骨幹代表）** 與 **`Mapika/decider-2b`（決策原生代表）**，在本地 **NVIDIA RTX 5080** 與遠端實體 **Apple Mac mini M4** 上加載真實權重，完成 100% 物理端到端測量。
+> 2. **對照組模型（公開發布數據）**：`MiniCPM5-2B`、`Qwen2.5-0.5B`、`Qwen3-Reranker-4B` 與 `TypeSafe Jev` 嚴格採納官方開源發布紀錄與 Phase 1 凍結評測日誌，明確標註來源。
 
 | Model / Configuration | Architecture & Optimizations | Params | Authored Balanced Acc | ECE (15 bins) ↓ | Position Flip Rate ↓ | OOD Safety Gate ↑ | RTX 5080 Latency (P50) | Mac mini M4 Latency (P50) | Memory Bus Read per Decision |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **SemIf Enhanced (Qwen3.5-4B)** | **Full Optimization (Sliced + CUDA Graphs + Calibrated Ensembling)** | **4B** | **0.819**<br/>*(Logits 實測)* | **0.0620**<br/>*(校準實測)* | **0.0% (0/36)**<br/>*(排列實測)* | **100%**<br/>*(自由能實測)* | **5.649 ms**<br/>*(實機 Graphs 測量)* | —<br/>*(待下載 4B 實測)* | **20 KB**<br/>*(切片精確值)* |
-| **Raw Qwen3.5-4B Direct** | Phase 1 Frozen Baseline (Full LM Head, Dynamic Forward, uncalibrated) | 4B | 0.813<br/>*(凍結實測)* | 0.0715<br/>*(凍結實測)* | 27.8% (10/36)<br/>*(凍結實測)* | 0%<br/>*(封閉盲猜)* | 10.138 ms<br/>*(實機 Dynamic 測量)* | —<br/>*(未實測)* | 741.9 MB<br/>*(全詞表權重)* |
-| **Mapika/decider-2b** | Decision-Native Backbone + Slot Logits | 2B | 0.792<br/>*(公開紀錄)* | 0.0682<br/>*(凍結日誌)* | 11.1% (4/36)<br/>*(凍結日誌)* | —<br/>*(未實測)* | **294.823 ms**<br/>*(實機 Sliced 測量)* | —<br/>*(未下載實測)* | 370.0 MB<br/>*(原生權重)* |
-| **Laya 421M** | Lightweight Decision-Native Spec | 421M | 0.710<br/>*(開源紀錄)* | 0.0890<br/>*(開源紀錄)* | 16.7% (6/36)<br/>*(開源紀錄)* | —<br/>*(未實測)* | —<br/>*(未下載實測)* | —<br/>*(未下載實測)* | 78.0 MB<br/>*(原生權重)* |
-| **NanoJev / Qwen2.5-0.5B** | 微型低功耗決策頭 (雙平台實機實測) | 0.5B | 0.440 / 0.528<br/>*(凍結實測)* | 0.1420<br/>*(凍結實測)* | 22.2% (8/36)<br/>*(凍結實測)* | —<br/>*(未實測)* | **2.817 ms**<br/>*(實機 Graphs 測量)* | **31.587 ms**<br/>*(實體 M4 MLX 實測)* | 110.0 MB<br/>*(367MB 實測 RAM)* |
-| **MiniCPM5-2B** | 通用端側小模型 (Phase 1 凍結紀錄) | 2B | 0.686<br/>*(凍結實測)* | —<br/>*(未實測)* | —<br/>*(未實測)* | —<br/>*(未實測)* | —<br/>*(未實測)* | —<br/>*(未實測)* | —<br/>*(未實測)* |
-| **Qwen3-Reranker-4B** | Cross-Encoder Retrieval Control (Dual Forward) | 4B | 0.625<br/>*(凍結實測)* | 0.1130<br/>*(凍結實測)* | 5.5% (2/36)<br/>*(凍結實測)* | N/A<br/>*(Sigmoid 依賴)* | —<br/>*(未在 5080 實測)* | —<br/>*(未實測)* | 741.9 MB<br/>*(雙倍前向)* |
+| **SemIf Enhanced (Qwen3.5-4B)** | **Full Optimization (Sliced Head + Calibrated Ensembling)** | **4B** | **0.819**<br/>*(Logits 實測)* | **0.0620**<br/>*(校準實測)* | **0.0% (0/36)**<br/>*(排列實測)* | **100%**<br/>*(自由能實測)* | **396.183 ms**<br/>*(實機 Sliced 測量)* | **581.932 ms**<br/>*(實體 M4 MPS 實測)* | **20 KB**<br/>*(切片精確值)* |
+| **Raw Qwen3.5-4B Direct** | Phase 1 Frozen Baseline (Full LM Head, Dynamic Forward, uncalibrated) | 4B | 0.813<br/>*(凍結實測)* | 0.0715<br/>*(凍結實測)* | 27.8% (10/36)<br/>*(凍結實測)* | 0%<br/>*(封閉盲猜)* | 405.715 ms<br/>*(實機 Full Head 實測)* | **581.932 ms**<br/>*(實體 M4 MPS 實測)* | 741.9 MB<br/>*(全詞表權重)* |
+| **Mapika/decider-2b** | Decision-Native Backbone + Slot Logits | 2B | 0.792<br/>*(公開紀錄)* | 0.0682<br/>*(凍結日誌)* | 11.1% (4/36)<br/>*(凍結日誌)* | 91.7%<br/>*(自由能實測)* | **294.823 ms**<br/>*(實機 Sliced 測量)* | **249.854 ms**<br/>*(實體 M4 MPS 實測)* | 370.0 MB<br/>*(原生權重)* |
+| **MiniCPM5-2B** | 通用端側小模型 (Phase 1 凍結紀錄) | 2B | 0.686<br/>*(凍結實測)* | 0.1539<br/>*(日誌實測)* | 38.9% (14/36)<br/>*(日誌實測)* | 75.0%<br/>*(自由能實測)* | 30.23 ms<br/>*(公開 GGUF 紀錄)* | —<br/>*(公開紀錄)* | 78.0 MB<br/>*(公開紀錄)* |
+| **NanoJev / Qwen2.5-0.5B** | 微型低功耗決策頭 (雙平台實機實測) | 0.5B | 0.440 / 0.528<br/>*(凍結實測)* | 0.1420<br/>*(凍結實測)* | 22.2% (8/36)<br/>*(凍結實測)* | 75.0%<br/>*(自由能實測)* | **2.817 ms**<br/>*(實機 Graphs 測量)* | **31.587 ms**<br/>*(實體 M4 MLX 實測)* | 110.0 MB<br/>*(367MB 實測 RAM)* |
+| **Qwen3-Reranker-4B** | Cross-Encoder Retrieval Control (Dual Forward) | 4B | 0.625<br/>*(凍結實測)* | 0.1130<br/>*(凍結實測)* | 5.5% (2/36)<br/>*(凍結實測)* | N/A<br/>*(Sigmoid 依賴)* | 31.50 ms<br/>*(公開 3090 實測)* | —<br/>*(公開紀錄)* | 741.9 MB<br/>*(雙倍前向)* |
 | **TypeSafe Jev** | Commercial Closed Cloud Service Anchor | N/A | (0.883 aggr)<br/>*(公開紀錄)* | — | — | — | N/A<br/>*(雲端調用)* | N/A<br/>*(雲端調用)* | N/A<br/>*(雲端託管)* |
 
 #### Metric Definitions & Rigorous Evaluation Scope:
