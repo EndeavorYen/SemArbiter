@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 
 from .core import load_causal_model, validate_row
+from .decider import DEFAULT_DECIDER_TEMPERATURE
+from .decider import score as decider_score
 from .direct import score as direct_score
 from .reranker import score as reranker_score
 from .serial import SerialPrefixScorer
@@ -15,12 +17,13 @@ from .shared import score_shared
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mode", choices=("direct", "serial", "shared", "reranker"), required=True)
+    parser.add_argument("--mode", choices=("direct", "serial", "shared", "reranker", "decider"), required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--revision", required=True)
     parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--max-tokens", type=int, default=4096)
+    parser.add_argument("--temperature", type=float, default=None)
     args = parser.parse_args()
     if args.output.exists() or args.max_tokens < 1:
         parser.error("Output must be new and max-tokens must be positive")
@@ -40,6 +43,11 @@ def main() -> None:
             scorer = SerialPrefixScorer(model, tokenizer, metadata, args.max_tokens)
             for row in rows:
                 destination.write(json.dumps(scorer.score(row), allow_nan=False) + "\n")
+                destination.flush()
+        elif args.mode == "decider":
+            temp = args.temperature if args.temperature is not None else DEFAULT_DECIDER_TEMPERATURE
+            for row in rows:
+                destination.write(json.dumps(decider_score(model, tokenizer, row, metadata, args.max_tokens, temperature=temp), allow_nan=False) + "\n")
                 destination.flush()
         else:
             scorer = direct_score if args.mode == "direct" else reranker_score
