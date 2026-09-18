@@ -107,6 +107,38 @@ def basic(rows):
                 balanced_accuracy=sum(recalls)/len(recalls), macro_f1=sum(f1)/len(f1))
 
 
+def compute_ece(valid_rows, n_bins=15):
+    """Compute Expected Calibration Error (ECE), Maximum Calibration Error (MCE), and per-bin statistics."""
+    if not valid_rows:
+        return dict(ece=None, mce=None, n_bins=n_bins, bins=[])
+    n_total = len(valid_rows)
+    bins = []
+    weighted_gap_sum = 0.0
+    max_gap = 0.0
+
+    for b in range(n_bins):
+        part = [r for r in valid_rows if min(n_bins - 1, int(r['confidence'] * n_bins)) == b]
+        if part:
+            count = len(part)
+            mean_conf = sum(r['confidence'] for r in part) / count
+            acc = sum(r['correct'] for r in part) / count
+            gap = abs(acc - mean_conf)
+            weighted_gap_sum += (count / n_total) * gap
+            if gap > max_gap:
+                max_gap = gap
+            bins.append(dict(
+                bin=b,
+                lower=b / n_bins,
+                upper=(b + 1) / n_bins,
+                n=count,
+                fraction=count / n_total,
+                mean_confidence=mean_conf,
+                accuracy=acc,
+                gap=gap,
+            ))
+    return dict(ece=weighted_gap_sum, mce=max_gap, n_bins=n_bins, evaluated_samples=n_total, bins=bins)
+
+
 def summarize(rows):
     result = basic(rows)
     if not rows:
@@ -138,6 +170,13 @@ def summarize(rows):
             result['reliability_bins'].append(dict(lower=b/10,upper=(b+1)/10,n=len(part),
                 mean_confidence=sum(r['confidence'] for r in part)/len(part),
                 accuracy=sum(r['correct'] for r in part)/len(part)))
+    calib_15 = compute_ece(valid, n_bins=15)
+    calib_10 = compute_ece(valid, n_bins=10)
+    result['ece'] = calib_15['ece']
+    result['ece_15'] = calib_15['ece']
+    result['ece_10'] = calib_10['ece']
+    result['mce'] = calib_15['mce']
+    result['calibration_report_15'] = calib_15
     rng, values = random.Random(217), []
     for _ in range(1000):
         draw = [groups[rng.randrange(len(groups))] for _ in groups]

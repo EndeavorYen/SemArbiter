@@ -6,3 +6,4 @@ results*.jsonl
 reranker-results*.jsonl
 models/
 cache/
+*.egg-info/
