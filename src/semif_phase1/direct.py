@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 import time
 
-from .core import LETTERS, digest, direct_messages, softmax
+from .core import LETTERS, apply_prior_calibration, digest, direct_messages, softmax
 
 PROMPT_VERSION = "direct-options-v1"
 
@@ -45,7 +45,15 @@ def encode_prompt(tokenizer, row: dict, max_tokens: int) -> tuple[list[int], lis
     return ids, slots, digest(prompt)
 
 
-def score(model, tokenizer, row: dict, metadata: dict, max_tokens: int = 4096) -> dict:
+def score(
+    model,
+    tokenizer,
+    row: dict,
+    metadata: dict,
+    max_tokens: int = 4096,
+    temperature: float = 1.0,
+    prior_logits: list[float] | None = None,
+) -> dict:
     import torch
 
     started = time.perf_counter()
@@ -63,11 +71,25 @@ def score(model, tokenizer, row: dict, metadata: dict, max_tokens: int = 4096) -
     if device.type == "cuda":
         torch.cuda.synchronize(device)
     selected = vocabulary[slots].cpu().tolist()
+    if prior_logits is not None:
+        calibrated_logits = apply_prior_calibration(selected, prior_logits[:len(selected)])
+    else:
+        calibrated_logits = selected
+
+    probs = softmax(calibrated_logits, temperature=temperature)
+    status = (
+        "conditional option score; uncalibrated as decision confidence"
+        if (temperature == 1.0 and prior_logits is None)
+        else f"calibrated decision distribution (T={temperature}, prior_debiased={prior_logits is not None})"
+    )
     return {
         "id": row["id"],
         "option_ids": [option["id"] for option in row["options"]],
-        "probabilities": softmax(selected),
+        "probabilities": probs,
         "option_logits": selected,
+        "calibrated_logits": calibrated_logits,
+        "temperature": temperature,
+        "prior_debiased": prior_logits is not None,
         "input_tokens": len(ids),
         "forward_seconds": time.perf_counter() - forward_start,
         "total_seconds": time.perf_counter() - started,
@@ -75,5 +97,5 @@ def score(model, tokenizer, row: dict, metadata: dict, max_tokens: int = 4096) -
         "prompt_version": PROMPT_VERSION,
         "model": metadata,
         "readout": "native full-vocabulary last-position logits restricted to declared answer slots",
-        "probability_status": "conditional option score; uncalibrated as decision confidence",
+        "probability_status": status,
     }
