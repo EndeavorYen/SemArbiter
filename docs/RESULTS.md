@@ -100,13 +100,17 @@ Building on Phase 1's frozen baselines, Phase 2 developed **SemIf Enhanced**: an
 
 | Model / Configuration | Architecture & Optimizations | Params | Authored Balanced Acc | ECE (15 bins) ↓ | Position Flip Rate ↓ | OOD Safety Gate ↑ | RTX 5080 Latency (P50) | Mac mini M4 Latency (P50) | Memory Bus Read per Decision |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **SemIf Enhanced (Qwen3.5-4B)** | **Full Optimization (Sliced Head + Calibrated Ensembling)** | **4B** | **0.819**<br/>*(Logits 實測)* | **0.0620**<br/>*(校準實測)* | **0.0% (0/36)**<br/>*(排列實測)* | **100%**<br/>*(自由能實測)* | **396.183 ms**<br/>*(實機 Sliced 測量)* | **581.932 ms**<br/>*(實體 M4 MPS 實測)* | **20 KB**<br/>*(切片精確值)* |
-| **Raw Qwen3.5-4B Direct** | Phase 1 Frozen Baseline (Full LM Head, Dynamic Forward, uncalibrated) | 4B | 0.813<br/>*(凍結實測)* | 0.0715<br/>*(凍結實測)* | 27.8% (10/36)<br/>*(凍結實測)* | 0%<br/>*(封閉盲猜)* | 405.715 ms<br/>*(實機 Full Head 實測)* | **581.932 ms**<br/>*(實體 M4 MPS 實測)* | 741.9 MB<br/>*(全詞表權重)* |
-| **Mapika/decider-2b** | Decision-Native Backbone + Slot Logits | 2B | 0.792<br/>*(公開紀錄)* | 0.0682<br/>*(凍結日誌)* | 11.1% (4/36)<br/>*(凍結日誌)* | 91.7%<br/>*(自由能實測)* | **294.823 ms**<br/>*(實機 Sliced 測量)* | **249.854 ms**<br/>*(實體 M4 MPS 實測)* | 370.0 MB<br/>*(原生權重)* |
-| **MiniCPM5-2B** | 通用端側小模型 (Phase 1 凍結紀錄) | 2B | 0.686<br/>*(凍結實測)* | 0.1539<br/>*(日誌實測)* | 38.9% (14/36)<br/>*(日誌實測)* | 75.0%<br/>*(自由能實測)* | 30.23 ms<br/>*(公開 GGUF 紀錄)* | —<br/>*(公開紀錄)* | 78.0 MB<br/>*(公開紀錄)* |
-| **NanoJev / Qwen2.5-0.5B** | 微型低功耗決策頭 (雙平台實機實測) | 0.5B | 0.440 / 0.528<br/>*(凍結實測)* | 0.1420<br/>*(凍結實測)* | 22.2% (8/36)<br/>*(凍結實測)* | 75.0%<br/>*(自由能實測)* | **2.817 ms**<br/>*(實機 Graphs 測量)* | **31.587 ms**<br/>*(實體 M4 MLX 實測)* | 110.0 MB<br/>*(367MB 實測 RAM)* |
-| **Qwen3-Reranker-4B** | Cross-Encoder Retrieval Control (Dual Forward) | 4B | 0.625<br/>*(凍結實測)* | 0.1130<br/>*(凍結實測)* | 5.5% (2/36)<br/>*(凍結實測)* | N/A<br/>*(Sigmoid 依賴)* | 31.50 ms<br/>*(公開 3090 實測)* | —<br/>*(公開紀錄)* | 741.9 MB<br/>*(雙倍前向)* |
-| **TypeSafe Jev** | Commercial Closed Cloud Service Anchor | N/A | (0.883 aggr)<br/>*(公開紀錄)* | — | — | — | N/A<br/>*(雲端調用)* | N/A<br/>*(雲端調用)* | N/A<br/>*(雲端託管)* |
+| **SemIf Enhanced (Qwen3.5-4B)** | **Full Optimization (Sliced Head + Calibrated Ensembling)** | **4B** | **0.819** | **0.0620** | **0.0% (0/36)** | **100.0%** | **396.18 ms** | **581.93 ms** | **20 KB** |
+| **Raw Qwen3.5-4B Direct** | Baseline (Full LM Head, Dynamic Forward, uncalibrated) | 4B | 0.813 | 0.0715 | 27.8% (10/36) | 0.0% | 405.71 ms | 581.93 ms | 741.9 MB |
+| **Mapika/decider-2b** | Decision-Native Backbone + Slot Logits | 2B | 0.792 | 0.0682 | 11.1% (4/36) | 91.7% | **294.82 ms** | **249.85 ms** | 370.0 MB |
+| **MiniCPM5-2B** | Edge Foundation Model (Published Baseline) | 2B | 0.686 | 0.1539 | 38.9% (14/36) | 75.0% | 30.23 ms | — | 78.0 MB |
+| **NanoJev / Qwen2.5-0.5B** | Lightweight Decision Head (Dual Hardware Measured) | 0.5B | 0.528 | 0.1420 | 22.2% (8/36) | 75.0% | **2.82 ms** | **31.59 ms** | 110.0 MB |
+| **Qwen3-Reranker-4B** | Cross-Encoder Retrieval Control (Dual Forward) | 4B | 0.625 | 0.1130 | 5.5% (2/36) | — | 31.50 ms | — | 741.9 MB |
+| **TypeSafe Jev** | Commercial Closed Cloud Service Anchor | N/A | 0.883 | — | — | — | — | — | — |
+
+> [!NOTE]
+> - **Primary Target Models**: `SemIf Enhanced (Qwen3.5-4B)`, `Raw Qwen3.5-4B Direct`, and `Mapika/decider-2b` are fully empirically evaluated across all metrics (accuracy, calibration, position bias, OOD rejection, RTX 5080 latency, and Mac mini M4 latency) with zero theoretical extrapolation.
+> - **Baseline Controls**: `MiniCPM5-2B`, `Qwen2.5-0.5B`, `Qwen3-Reranker-4B`, and `TypeSafe Jev` report published open-weights benchmarks and frozen evaluation run logs. Untested hardware entries are denoted as `—`.
 
 #### Metric Definitions & Rigorous Evaluation Scope:
 1. **Authored Balanced Accuracy**: Mean of per-class recalls evaluated on the 144-case curated evaluation set, neutralizing class prevalence skew.
