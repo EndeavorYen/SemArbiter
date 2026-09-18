@@ -92,8 +92,23 @@ def digest(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 
 
-def load_causal_model(source: str, revision: str):
-    """Load one pinned causal model on the sole visible CUDA device."""
+def resolve_device(requested_device: str | None = None) -> str:
+    """Resolve the optimal execution device (CUDA, MPS for Apple Silicon, or CPU)."""
+    import torch
+
+    if requested_device is not None:
+        return requested_device
+    if torch.cuda.is_available():
+        if torch.cuda.device_count() != 1:
+            raise ValueError("Expose exactly one CUDA GPU, for example with CUDA_VISIBLE_DEVICES")
+        return "cuda:0"
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
+def load_causal_model(source: str, revision: str, device: str | None = None):
+    """Load one pinned causal model on CUDA, Apple Silicon MPS, or CPU."""
     import torch
     import transformers
 
@@ -102,8 +117,8 @@ def load_causal_model(source: str, revision: str):
         raise ValueError("Remote models require a pinned 40-character commit revision")
     if local and not revision:
         raise ValueError("Local models require an explicit manifest/revision string")
-    if not torch.cuda.is_available() or torch.cuda.device_count() != 1:
-        raise ValueError("Expose exactly one CUDA GPU, for example with CUDA_VISIBLE_DEVICES")
+    
+    target_device = resolve_device(device)
     common = {"revision": None if local else revision, "local_files_only": local, "trust_remote_code": False}
     config = transformers.AutoConfig.from_pretrained(source, **common)
     tokenizer = transformers.AutoTokenizer.from_pretrained(source, **common)
@@ -113,22 +128,31 @@ def load_causal_model(source: str, revision: str):
         if cls is None:
             raise RuntimeError("Installed transformers lacks the native Qwen3.5 model")
         config = config.get_text_config()
-    model, loading = cls.from_pretrained(
-        source,
-        config=config,
-        dtype=torch.bfloat16,
-        device_map={"": "cuda:0"},
-        low_cpu_mem_usage=True,
-        output_loading_info=True,
+
+    load_dtype = torch.bfloat16 if (target_device.startswith("cuda") or target_device == "mps") else torch.float32
+    device_map = {"": target_device} if target_device != "cpu" else None
+
+    model_kwargs = {
+        "config": config,
+        "dtype": load_dtype,
+        "low_cpu_mem_usage": True,
+        "output_loading_info": True,
         **common,
-    )
+    }
+    if device_map is not None:
+        model_kwargs["device_map"] = device_map
+
+    model, loading = cls.from_pretrained(source, **model_kwargs)
+    if target_device == "cpu":
+        model.to("cpu")
     if any(loading.get(key) for key in ("missing_keys", "mismatched_keys", "error_msgs")):
         raise RuntimeError(f"Checkpoint did not load completely: {loading}")
     model.eval()
     metadata = {
         "source": source,
         "revision": revision,
-        "dtype": "bfloat16",
+        "dtype": str(load_dtype).replace("torch.", ""),
+        "device": target_device,
         "torch_version": torch.__version__,
         "transformers_version": transformers.__version__,
     }
