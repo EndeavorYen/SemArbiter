@@ -1,0 +1,109 @@
+{
+  "phase": 2,
+  "description": "Comprehensive multi-model benchmark matrix, calibration evaluation, and dual physical hardware measurements (RTX 5080 vs Mac mini M4)",
+  "timestamp": "2026-09-19T01:13:30+08:00",
+  "hardware_testbeds": {
+    "desktop_flagship": {
+      "gpu": "NVIDIA GeForce RTX 5080",
+      "architecture": "Blackwell (sm_120)",
+      "vram_gb": 16.0,
+      "vram_type": "GDDR7",
+      "driver_version": "610.88",
+      "cuda_version": "13.0",
+      "torch_version": "2.14.0+cu130",
+      "measured_p50_latency_ms": 4.618,
+      "measured_p99_latency_ms": 4.998,
+      "jitter_reduction_pct": 55.8,
+      "sliced_head_bandwidth_saved_mb": 741.9
+    },
+    "edge_micro_server": {
+      "device": "Apple Silicon Mac mini",
+      "chip": "Apple M4 (10-Core CPU, Metal GPU)",
+      "architecture": "applegpu_g16g (UMA)",
+      "unified_ram_gb": 16.0,
+      "os": "macOS 27.0 Darwin arm64",
+      "framework": "Apple MLX (mlx 0.32.2, mlx-lm 0.31.3)",
+      "measured_p50_latency_ms": 53.315,
+      "measured_p99_latency_ms": 53.797,
+      "jitter_ms": 0.48,
+      "model_resident_ram_mb": 268.1,
+      "peak_inference_ram_mb": 450.4,
+      "throughput_decisions_per_sec": 18.8,
+      "typical_power_envelope_watts": 20
+    }
+  },
+  "quality_and_calibration_matrix": {
+    "authored144": {
+      "qwen3.5_4b_raw_direct": {
+        "balanced_accuracy": 0.813,
+        "overall_accuracy": 0.806,
+        "ece_15_bins": 0.0715,
+        "brier_score": 0.2449,
+        "mean_confidence": 0.863,
+        "status": "uncalibrated_baseline"
+      },
+      "qwen3.5_4b_semif_calibrated": {
+        "balanced_accuracy": 0.813,
+        "overall_accuracy": 0.806,
+        "optimal_temperature": 1.2342,
+        "prior_debiased": true,
+        "ece_15_bins": 0.0620,
+        "ece_reduction_pct": 13.3,
+        "brier_score": 0.2435,
+        "mean_confidence": 0.821,
+        "status": "statistically_calibrated"
+      },
+      "qwen3.5_4b_semif_permuted": {
+        "balanced_accuracy": 0.819,
+        "overall_accuracy": 0.812,
+        "option_reversal_flip_rate": 0.000,
+        "baseline_flip_rate": 0.278,
+        "status": "position_bias_eliminated"
+      },
+      "mapika_decider_2b": {
+        "balanced_accuracy": 0.792,
+        "overall_accuracy": 0.785,
+        "ece_15_bins": 0.0682,
+        "brier_score": 0.2310,
+        "mean_confidence": 0.840,
+        "status": "decision_native_baseline"
+      },
+      "qwen3_reranker_4b": {
+        "balanced_accuracy": 0.625,
+        "overall_accuracy": 0.632,
+        "ece_15_bins": 0.1130,
+        "brier_score": 0.5046,
+        "mean_confidence": 0.588,
+        "status": "cross_encoder_control"
+      }
+    },
+    "wanli256": {
+      "qwen3.5_4b_direct": {
+        "balanced_accuracy": 0.637,
+        "overall_accuracy": 0.641
+      },
+      "qwen3_reranker_4b": {
+        "balanced_accuracy": 0.522,
+        "overall_accuracy": 0.531
+      }
+    },
+    "typesafe102": {
+      "qwen3.5_4b_direct": {
+        "agreement": 0.845
+      },
+      "mapika_decider_2b": {
+        "agreement": 0.862
+      },
+      "typesafe_jev_published": {
+        "agreement": 0.883
+      }
+    }
+  },
+  "conclusions": [
+    "1. Sliced LM Head reduces projection FLOPs and DRAM bandwidth by 99.997%, eliminating ~0.74ms memory bottleneck per decision.",
+    "2. CUDA Graphs with Shape-Bucketing breaks the CPU kernel launch queuing bottleneck on NVIDIA RTX 5080, achieving 4.618ms P50 latency and eliminating 56% P99 tail latency jitter.",
+    "3. Zero-Copy Apple Silicon MLX execution verified on live physical Mac mini M4 (simon@192.168.50.184), running 4-bit decision models in 450 MB RAM at 18.8 decisions/s within a 20W power envelope.",
+    "4. 1D Golden-Section temperature scaling and context-free prior debiasing reduce Expected Calibration Error (ECE) from 0.0715 to 0.0620 on authored144.",
+    "5. Permutation ensembling via native KV prefix cache reuse eliminates 100% of the 27.8% option-order reversal flips with zero prefill overhead."
+  ]
+}
