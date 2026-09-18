@@ -56,13 +56,36 @@ def direct_messages(row: dict) -> list[dict]:
     ]
 
 
-def softmax(values: list[float]) -> list[float]:
+def softmax(values: list[float], temperature: float = 1.0) -> list[float]:
+    if temperature <= 0 or not math.isfinite(temperature):
+        raise ValueError("Temperature must be a positive finite number")
     if len(values) < 2 or any(not math.isfinite(value) for value in values):
         raise ValueError("Need at least two finite scores")
-    maximum = max(values)
-    weights = [math.exp(value - maximum) for value in values]
+    scaled = [value / temperature for value in values]
+    maximum = max(scaled)
+    weights = [math.exp(val - maximum) for val in scaled]
     total = sum(weights)
     return [weight / total for weight in weights]
+
+
+def apply_prior_calibration(logits: list[float], prior_logits: list[float]) -> list[float]:
+    """Subtract unconditional context-free prior logits: z_calib = z_raw - z_null."""
+    if len(logits) != len(prior_logits):
+        raise ValueError("Logits and prior_logits must have identical length")
+    return [z - z_null for z, z_null in zip(logits, prior_logits)]
+
+
+def null_prompt_row(options_count: int = 2) -> dict:
+    """Construct an information-free null state row for prior estimation."""
+    return {
+        "id": "null_prior_anchor",
+        "state": "N/A",
+        "question": "Which option follows?",
+        "options": [
+            {"id": f"opt_{LETTERS[i]}", "description": f"Option {LETTERS[i]}."}
+            for i in range(options_count)
+        ],
+    }
 
 
 def digest(text: str) -> str:
