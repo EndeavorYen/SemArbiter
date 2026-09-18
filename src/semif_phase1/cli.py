@@ -10,6 +10,7 @@ from .core import load_causal_model, null_prompt_row, validate_row
 from .decider import DEFAULT_DECIDER_TEMPERATURE
 from .decider import score as decider_score
 from .direct import score as direct_score
+from .gating import gate_decision
 from .permutation import score_permuted
 from .reranker import score as reranker_score
 from .serial import SerialPrefixScorer
@@ -28,6 +29,9 @@ def main() -> None:
     parser.add_argument("--calibrate-prior", action="store_true", help="Estimate and subtract context-free prior logits")
     parser.add_argument("--permute-ensemble", action="store_true", help="Ensemble over option order permutations to eliminate position bias")
     parser.add_argument("--max-perms", type=int, default=2, help="Maximum number of permutations to evaluate per row")
+    parser.add_argument("--gating", action="store_true", help="Apply confidence and free-energy decision gating")
+    parser.add_argument("--min-confidence", type=float, default=0.5, help="Minimum confidence threshold for automatic decisions")
+    parser.add_argument("--energy-threshold", type=float, default=None, help="Maximum Helmholtz free energy threshold for OOD rejection")
     args = parser.parse_args()
     if args.output.exists() or args.max_tokens < 1:
         parser.error("Output must be new and max-tokens must be positive")
@@ -48,21 +52,34 @@ def main() -> None:
             anchor_res = decider_score(model, tokenizer, anchor, metadata, args.max_tokens)
         prior_logits = anchor_res["option_logits"]
 
+    def maybe_gate(res):
+        if args.gating and isinstance(res, dict) and "probabilities" in res and "option_logits" in res:
+            res["gating"] = gate_decision(
+                probabilities=res["probabilities"],
+                logits=res["option_logits"],
+                option_ids=res["option_ids"],
+                min_confidence=args.min_confidence,
+                energy_threshold=args.energy_threshold,
+                temperature=res.get("temperature", 1.0),
+            )
+        return res
+
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("x") as destination:
         if args.mode == "shared":
             results, timing = score_shared(model, tokenizer, rows, metadata, args.max_tokens)
             for result in results:
-                destination.write(json.dumps({**result, "shared_timing": timing}, allow_nan=False) + "\n")
+                destination.write(json.dumps(maybe_gate({**result, "shared_timing": timing}), allow_nan=False) + "\n")
         elif args.mode == "serial":
             scorer = SerialPrefixScorer(model, tokenizer, metadata, args.max_tokens)
             for row in rows:
-                destination.write(json.dumps(scorer.score(row), allow_nan=False) + "\n")
+                destination.write(json.dumps(maybe_gate(scorer.score(row)), allow_nan=False) + "\n")
                 destination.flush()
         elif args.mode == "decider":
             temp = args.temperature if args.temperature is not None else DEFAULT_DECIDER_TEMPERATURE
             for row in rows:
-                destination.write(json.dumps(decider_score(model, tokenizer, row, metadata, args.max_tokens, temperature=temp), allow_nan=False) + "\n")
+                res = decider_score(model, tokenizer, row, metadata, args.max_tokens, temperature=temp)
+                destination.write(json.dumps(maybe_gate(res), allow_nan=False) + "\n")
                 destination.flush()
         elif args.mode == "direct":
             temp = args.temperature if args.temperature is not None else 1.0
@@ -88,11 +105,11 @@ def main() -> None:
                         temperature=temp,
                         prior_logits=prior_logits,
                     )
-                destination.write(json.dumps(res, allow_nan=False) + "\n")
+                destination.write(json.dumps(maybe_gate(res), allow_nan=False) + "\n")
                 destination.flush()
         else:
             for row in rows:
-                destination.write(json.dumps(reranker_score(model, tokenizer, row, metadata, args.max_tokens), allow_nan=False) + "\n")
+                destination.write(json.dumps(maybe_gate(reranker_score(model, tokenizer, row, metadata, args.max_tokens)), allow_nan=False) + "\n")
                 destination.flush()
 
 
