@@ -14,5 +14,5 @@
 | **[教程 04](04_prefix_cache_and_position_bias.md)** | 前綴快取與選項位置偏置消除 | RoPE 近因效應、因果注意力非對稱性、排列組合集成（Permutation Ensembling）、KV Cache 重用 | [#5](https://github.com/EndeavorYen/SemIf/issues/5) |
 | **[教程 05](05_open_world_and_ood_detection.md)** | 開放世界拒絕與基於自由能的 OOD 偵測 | Softmax 盲點與平移不變性、Helmholtz 自由能理論、獨立 Sigmoid 多標籤門控與棄權機制 | [#6](https://github.com/EndeavorYen/SemIf/issues/6) |
 | **[教程 06](06_transformer_lm_head_optimization.md)** | Transformer Sliced LM Head 投影優化 | 詞表矩陣切片、RTX 5080 記憶體頻寬解耦、跳過 150k 全詞表解碼、無損等價性驗證 | [#7](https://github.com/EndeavorYen/SemIf/issues/7) |
-| **[教程 07](07_cuda_graphs_and_compilation.md)** | CUDA Graphs 與 torch.compile 極限延遲優化 | *(規劃中)* Kernel Launch 開銷消除、形狀分桶（Shape Bucketing）、微秒級延遲調優 | [#8](https://github.com/EndeavorYen/SemIf/issues/8) |
+| **[教程 07](07_cuda_graphs_and_compilation.md)** | CUDA Graphs 與 torch.compile 極限延遲優化 | Kernel Launch 開銷消除、形狀分桶（Shape Bucketing）、RTX 5080 實測 4.6ms 延遲 | [#8](https://github.com/EndeavorYen/SemIf/issues/8) |
 | **[教程 08](08_mac_silicon_and_mlx_deployment.md)** | Apple Silicon Mac mini 邊緣端部署 | *(規劃中)* MLX 原生架構、統一記憶體（Unified Memory）零拷貝決策執行 | [#9](https://github.com/EndeavorYen/SemIf/issues/9) |
