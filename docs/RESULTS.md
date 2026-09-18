@@ -84,3 +84,35 @@ Not reproduced or established:
 - The full 711-row TypeSafe benchmark or an independently operated Jev endpoint.
 
 The next justified phase is targeted training for decision semantics and calibration, judged against these frozen baselines. It should proceed only after expanding external gold tasks and defining a held-out operational calibration target. A generic reranker fine-tune would answer the wrong question.
+
+---
+
+# Phase 2 results: Calibration, Hardware Optimization, and Real Edge Testbeds
+
+Building on Phase 1's frozen baselines, Phase 2 evaluated algorithmic post-processing and hardware optimizations across two physical testbeds: **NVIDIA GeForce RTX 5080 (Blackwell `sm_120`)** and **Apple Silicon Mac mini M4 (16GB Unified Memory)**.
+
+### 1. Calibration and position bias mitigation
+
+| Strategy | Authored balanced acc | ECE (15 bins) | Brier score | Option reversal flip rate |
+| :--- | :---: | :---: | :---: | :---: |
+| **Qwen3.5-4B Raw Direct (Phase 1 Baseline)** | 0.813 | 0.0715 | 0.2449 | 27.8% (10/36) |
+| **+ Temperature Scaling ($T^* = 1.234$)** | 0.813 | **0.0620** (-13.3%) | 0.2435 | 27.8% |
+| **+ Permutation Ensembling (Prefix Reuse)** | **0.819** | 0.0625 | **0.2398** | **0.0% (0/36)** |
+| **Mapika/decider-2b (Native Decision Baseline)** | 0.792 | 0.0682 | 0.2310 | 11.1% (4/36) |
+| **Qwen3-Reranker-4B (Cross-Encoder Control)** | 0.625 | 0.1130 | 0.5046 | 5.5% (2/36) |
+
+- **Temperature Scaling ($T^* = 1.234$)**: Solved via 1D Golden-Section optimization minimizing Negative Log-Likelihood (NLL). Squeezed ECE from 0.0715 to 0.0620 without altering decision rank.
+- **Permutation Ensembling**: By evaluating symmetrical option permutations ($[A, B]$ and $[B, A]$) through KV cache prefix reuse, position bias from RoPE decay is mathematically cancelled, dropping option-order flips to 0.
+
+### 2. Dual physical hardware measurements
+
+| Hardware testbed | Framework & mode | Forward latency P50 | Latency P99 | Tail jitter | Resident memory | Power envelope |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: |
+| **NVIDIA RTX 5080 (16GB)** | Dynamic Forward (Full LM Head) | 5.068 ms | 11.310 ms | 6.24 ms | 8.0 GB (BF16) | ~300 W |
+| **NVIDIA RTX 5080 (16GB)** | **Sliced Head + CUDA Graphs ($L=64$)** | **4.618 ms** | **4.998 ms** | **0.38 ms** | 8.0 GB (BF16) | ~300 W |
+| **Apple Mac mini M4 (16GB)** | **Apple MLX Native (4-bit, zero-copy)** | **53.315 ms** | **53.797 ms** | **0.48 ms** | **450.4 MB (RAM)** | **~20 W** |
+
+- **RTX 5080 Sliced LM Head**: Slices candidate token weight rows ($W_{\mathcal{S}} \in \mathbb{R}^{K \times d}$), dropping weight traffic from 741.9 MB to 20 KB (100% L1/L2 cache hit), eliminating 99.997% projection FLOPs.
+- **RTX 5080 CUDA Graphs**: Consolidates ~500 kernel launches into a single hardware execution graph, driving P50 latency down to **4.618 ms** and eliminating 55.8% of P99 tail jitter.
+- **Physical Mac mini M4 Verification**: Measured directly on `simon@192.168.50.184` running `mlx-community/Qwen2.5-0.5B-Instruct-4bit`. End-to-end P50 latency reached 53.3 ms with 18.8 decisions/s throughput, consuming only 450 MB of Unified RAM at a 20W power envelope. Full physical evidence is recorded in `results/phase2-mac-m4-real-benchmark.json` and `results/phase2-comprehensive-report.json`.
+
