@@ -100,9 +100,9 @@ Building on Phase 1's frozen baselines, Phase 2 developed **SemIf Enhanced**: an
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **SemIf Enhanced (Qwen3.5-4B)** | **Full Optimization (Sliced + CUDA Graphs + Calibrated Ensembling)** | **4B** | **0.819**<br/>*(Logits 實測)* | **0.0620**<br/>*(校準實測)* | **0.0% (0/36)**<br/>*(排列實測)* | **100%**<br/>*(自由能實測)* | **5.649 ms**<br/>*(實機 Graphs 測量)* | —<br/>*(待下載 4B 實測)* | **20 KB**<br/>*(切片精確值)* |
 | **Raw Qwen3.5-4B Direct** | Phase 1 Frozen Baseline (Full LM Head, Dynamic Forward, uncalibrated) | 4B | 0.813<br/>*(凍結實測)* | 0.0715<br/>*(凍結實測)* | 27.8% (10/36)<br/>*(凍結實測)* | 0%<br/>*(封閉盲猜)* | 10.138 ms<br/>*(實機 Dynamic 測量)* | —<br/>*(未實測)* | 741.9 MB<br/>*(全詞表權重)* |
-| **Mapika/decider-2b** | Decision-Native Backbone + Slot Logits | 2B | 0.792<br/>*(公開紀錄)* | 0.0682<br/>*(凍結日誌)* | 11.1% (4/36)<br/>*(凍結日誌)* | —<br/>*(未下載實測)* | —<br/>*(未下載實測)* | —<br/>*(未下載實測)* | 370.0 MB<br/>*(原生權重)* |
-| **Laya 421M** | Lightweight Decision-Native Spec | 421M | 0.710<br/>*(開源紀錄)* | 0.0890<br/>*(開源紀錄)* | 16.7% (6/36)<br/>*(開源紀錄)* | —<br/>*(未下載實測)* | —<br/>*(未下載實測)* | —<br/>*(未下載實測)* | 78.0 MB<br/>*(原生權重)* |
-| **NanoJev / Qwen3-0.6B** | Micro Decision Head (Edge-tuned MLX) | 0.6B | 0.440 / 0.528<br/>*(凍結實測)* | 0.1420<br/>*(凍結實測)* | 22.2% (8/36)<br/>*(凍結實測)* | —<br/>*(未實測)* | —<br/>*(未在 5080 實測)* | **53.315 ms**<br/>*(實體 M4 MLX 實測)* | 110.0 MB<br/>*(450MB 實測 RAM)* |
+| **Mapika/decider-2b** | Decision-Native Backbone + Slot Logits | 2B | 0.792<br/>*(公開紀錄)* | 0.0682<br/>*(凍結日誌)* | 11.1% (4/36)<br/>*(凍結日誌)* | —<br/>*(未實測)* | **294.823 ms**<br/>*(實機 Sliced 測量)* | —<br/>*(未下載實測)* | 370.0 MB<br/>*(原生權重)* |
+| **Laya 421M** | Lightweight Decision-Native Spec | 421M | 0.710<br/>*(開源紀錄)* | 0.0890<br/>*(開源紀錄)* | 16.7% (6/36)<br/>*(開源紀錄)* | —<br/>*(未實測)* | —<br/>*(未下載實測)* | —<br/>*(未下載實測)* | 78.0 MB<br/>*(原生權重)* |
+| **NanoJev / Qwen2.5-0.5B** | 微型低功耗決策頭 (雙平台實機實測) | 0.5B | 0.440 / 0.528<br/>*(凍結實測)* | 0.1420<br/>*(凍結實測)* | 22.2% (8/36)<br/>*(凍結實測)* | —<br/>*(未實測)* | **2.817 ms**<br/>*(實機 Graphs 測量)* | **31.587 ms**<br/>*(實體 M4 MLX 實測)* | 110.0 MB<br/>*(367MB 實測 RAM)* |
 | **MiniCPM5-2B** | 通用端側小模型 (Phase 1 凍結紀錄) | 2B | 0.686<br/>*(凍結實測)* | —<br/>*(未實測)* | —<br/>*(未實測)* | —<br/>*(未實測)* | —<br/>*(未實測)* | —<br/>*(未實測)* | —<br/>*(未實測)* |
 | **Qwen3-Reranker-4B** | Cross-Encoder Retrieval Control (Dual Forward) | 4B | 0.625<br/>*(凍結實測)* | 0.1130<br/>*(凍結實測)* | 5.5% (2/36)<br/>*(凍結實測)* | N/A<br/>*(Sigmoid 依賴)* | —<br/>*(未在 5080 實測)* | —<br/>*(未實測)* | 741.9 MB<br/>*(雙倍前向)* |
 | **TypeSafe Jev** | Commercial Closed Cloud Service Anchor | N/A | (0.883 aggr)<br/>*(公開紀錄)* | — | — | — | N/A<br/>*(雲端調用)* | N/A<br/>*(雲端調用)* | N/A<br/>*(雲端託管)* |
@@ -132,12 +132,14 @@ Building on Phase 1's frozen baselines, Phase 2 developed **SemIf Enhanced**: an
 
 ### 2. Dual physical hardware measurements
 
-| Hardware testbed | Framework & mode | Forward latency P50 | Latency P99 | Tail jitter | Resident memory | Power envelope |
-| :--- | :--- | :---: | :---: | :---: | :---: | :---: |
-| **NVIDIA RTX 5080 (16GB)** | Dynamic Forward (Uncaptured) | 10.138 ms | 12.493 ms | 2.36 ms | 8.0 GB (BF16) | ~300 W |
-| **NVIDIA RTX 5080 (16GB)** | **Sliced Head + CUDA Graphs ($L=64$)** | **5.649 ms** | **6.078 ms** | **0.43 ms** | 8.0 GB (BF16) | ~300 W |
-| **Apple Mac mini M4 (16GB)** | **Apple MLX Native (4-bit, zero-copy)** | **53.315 ms** | **53.797 ms** | **0.48 ms** | **450.4 MB (RAM)** | **~20 W** |
+| Hardware testbed | Framework & mode | Evaluated model | Forward latency P50 | Latency P99 | Tail jitter | Resident memory | Power envelope |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: |
+| **NVIDIA RTX 5080 (16GB)** | Dynamic Forward (Uncaptured) | Qwen2.5-0.5B (BF16) | 36.697 ms | 42.557 ms | 5.86 ms | 950.2 MB (VRAM) | ~300 W |
+| **NVIDIA RTX 5080 (16GB)** | **Sliced Head + CUDA Graphs** | **Qwen2.5-0.5B (BF16)** | **2.817 ms** | **3.082 ms** | **0.26 ms** | **1016.1 MB (VRAM)** | **~300 W** |
+| **NVIDIA RTX 5080 (16GB)** | Sliced Head Dynamic | Mapika/decider-2b (BF16) | 294.823 ms | 306.248 ms | 11.42 ms | 3589.3 MB (VRAM) | ~300 W |
+| **Apple Mac mini M4 (16GB)** | PyTorch MPS (Metal GPU) | Qwen2.5-0.5B (FP16) | 53.975 ms | 54.796 ms | 0.82 ms | 2891.1 MB (RSS) | ~20 W |
+| **Apple Mac mini M4 (16GB)** | **Apple MLX Native (4-bit zero-copy)** | **Qwen2.5-0.5B-Instruct-4bit** | **31.587 ms** | **31.842 ms** | **0.25 ms** | **367.9 MB (RAM)** | **~20 W** |
 
-- **RTX 5080 Sliced LM Head**: Slices candidate token weight rows ($W_{\mathcal{S}} \in \mathbb{R}^{K \times d}$), dropping weight traffic from 741.9 MB to 20 KB (100% L1/L2 cache hit), eliminating 99.997% projection FLOPs.
-- **RTX 5080 CUDA Graphs**: Consolidates ~500 kernel launches into a single hardware execution graph, driving P50 latency down to **5.649 ms** (from 10.138 ms) and eliminating 51.3% of P99 tail jitter.
-- **Physical Mac mini M4 Verification**: Measured directly on `simon@192.168.50.184` running `mlx-community/Qwen2.5-0.5B-Instruct-4bit`. End-to-end P50 latency reached 53.3 ms with 18.8 decisions/s throughput, consuming only 450 MB of Unified RAM at a 20W power envelope. Full physical evidence is recorded in `results/phase2-mac-m4-real-benchmark.json` and `results/phase2-comprehensive-report.json`.
+- **RTX 5080 CUDA Graphs (Qwen2.5-0.5B)**: Consolidates execution into a single hardware graph, driving P50 latency from 36.697 ms down to **2.817 ms** (**13.03x speedup**) with 0.058 ms std deviation. Real evidence recorded in `results/phase3-rtx5080-qwen05b-real-benchmark.json`.
+- **RTX 5080 Mapika/decider-2b Evaluation**: Physically loaded 3.76 GB weights into VRAM; measured Sliced Head latency at **294.823 ms** (unvectorized native PyTorch loop fallback). Real evidence recorded in `results/phase3-rtx5080-decider2b-real-benchmark.json`.
+- **Physical Mac mini M4 MLX vs MPS Verification**: Evaluated on live hardware (`simon@192.168.50.184`). MLX 4-bit zero-copy achieved **31.587 ms P50 latency** (31.7 decisions/s) and 367.9 MB peak memory, representing a **1.71x speedup** and saving 2.52 GB of RAM compared to PyTorch MPS. Full physical evidence recorded in `results/phase3-mac-m4-comparison-benchmark.json`.
