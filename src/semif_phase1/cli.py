@@ -32,6 +32,7 @@ def main() -> None:
     parser.add_argument("--gating", action="store_true", help="Apply confidence and free-energy decision gating")
     parser.add_argument("--min-confidence", type=float, default=0.5, help="Minimum confidence threshold for automatic decisions")
     parser.add_argument("--energy-threshold", type=float, default=None, help="Maximum Helmholtz free energy threshold for OOD rejection")
+    parser.add_argument("--sliced-head", action=argparse.BooleanOptionalAction, default=True, help="Use restricted sliced LM head projection to avoid full vocabulary calculation")
     args = parser.parse_args()
     if args.output.exists() or args.max_tokens < 1:
         parser.error("Output must be new and max-tokens must be positive")
@@ -47,7 +48,7 @@ def main() -> None:
         max_opts = max(len(r["options"]) for r in rows)
         anchor = null_prompt_row(max_opts)
         if args.mode == "direct":
-            anchor_res = direct_score(model, tokenizer, anchor, metadata, args.max_tokens)
+            anchor_res = direct_score(model, tokenizer, anchor, metadata, args.max_tokens, sliced_head=args.sliced_head)
         else:
             anchor_res = decider_score(model, tokenizer, anchor, metadata, args.max_tokens)
         prior_logits = anchor_res["option_logits"]
@@ -94,6 +95,7 @@ def main() -> None:
                         temperature=temp,
                         prior_logits=prior_logits,
                         max_perms=args.max_perms,
+                        sliced_head=args.sliced_head,
                     )
                 else:
                     res = direct_score(
@@ -104,6 +106,7 @@ def main() -> None:
                         args.max_tokens,
                         temperature=temp,
                         prior_logits=prior_logits,
+                        sliced_head=args.sliced_head,
                     )
                 destination.write(json.dumps(maybe_gate(res), allow_nan=False) + "\n")
                 destination.flush()
