@@ -23,14 +23,14 @@
 
 ```mermaid
 flowchart TD
-    subgraph CausalLM [通用因果模型 (Qwen3.5-4B Direct)]
+    subgraph CausalLM ["通用因果模型 (Qwen3.5-4B Direct)"]
         C1["輸入: Chat 模板 (JSON 結構)"] --> C2["Backbone: 4B 因果 Transformer"]
         C2 --> C3["LM Head: 151,936 全詞表矩陣乘法"]
         C3 --> C4["輸出: 提取單個 Token Logits (未校準)"]
     end
 
-    subgraph DecisionNative [專門決策模型 (Mapika/decider-2b)]
-        D1["輸入: Context / Question / Options / Answer: ("] --> D2["Backbone: 2B 特化微調 Transformer"]
+    subgraph DecisionNative ["專門決策模型 (Mapika/decider-2b)"]
+        D1["輸入: Context / Question / Options / Answer 前綴"] --> D2["Backbone: 2B 特化微調 Transformer"]
         D2 --> D3["專門 Answer Slot 投影 + 溫度縮放 T=1.05"]
         D3 --> D4["輸出: 高校準機率 (ECE < 0.03) + 原生拒絕能力"]
     end
