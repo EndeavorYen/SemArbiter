@@ -287,6 +287,21 @@ body.fsd-theme .vector-label.selected {
   letter-spacing: 0.04em;
 }
 
+#fsd-vision {
+  pointer-events: none;
+  position: fixed;
+  left: 18px;
+  bottom: 128px;
+  max-width: min(520px, 70vw);
+  color: #d7e2ff;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  background: var(--fsd-bg);
+  border: 1px solid var(--fsd-line);
+  border-radius: 999px;
+  padding: 6px 12px;
+}
+
 @media (max-width: 650px) {
   body.fsd-theme .speed-cluster strong {
     font-size: 36px;
