@@ -265,6 +265,8 @@ class DecisionEngine:
         if is_ood and mode == "semif":
             final_action = "brake"
 
+        prob_dict = {aid: p for aid, p in zip(ACTION_IDS, probs)}
+
         # Continuous control translation using SemIf calibrated probabilities
         p_left = prob_dict.get("steer_left", 0.0)
         p_right = prob_dict.get("steer_right", 0.0)
@@ -292,8 +294,6 @@ class DecisionEngine:
         self.stats["min_latency_ms"] = min(self.stats["min_latency_ms"], latency_ms)
         self.stats["max_latency_ms"] = max(self.stats["max_latency_ms"], latency_ms)
 
-        prob_dict = {aid: p for aid, p in zip(ACTION_IDS, probs)}
-
         return {
             "action": final_action,
             "target_steering": steer,
@@ -307,12 +307,73 @@ class DecisionEngine:
             "mode": mode,
         }
 
+    def _determine_tier1_maneuver(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        """JevPilot 2.0 Tier 1 Strategic Maneuver Reasoning.
+        Analyzes traffic light signals, road-segment speed ceiling, and hazard proximity.
+        """
+        if not isinstance(state, dict):
+            return {"intent": "CRUISE", "directive": "Standard cruise and lane tracking."}
+
+        # 1. Traffic Light & Intersection Analysis
+        intersection = state.get("intersection")
+        if isinstance(intersection, dict):
+            sig = str(intersection.get("signal", "")).lower()
+            dist = intersection.get("distance_to_line_m")
+            already_entered = bool(intersection.get("already_entered", False))
+            stop_completed = bool(intersection.get("stop_completed", False))
+
+            if sig in ("red", "yellow") and not already_entered and not stop_completed:
+                if dist is None or dist <= 30.0:
+                    return {
+                        "intent": "YIELD_RED_LIGHT",
+                        "directive": f"RED/YELLOW SIGNAL ({sig.upper()}) at {dist}m ahead. Bring vehicle to a smooth halt before stop line (stop_at_line=True). Do not enter intersection.",
+                        "target_stop": True,
+                    }
+
+        # 2. Road Speed Ceiling Compliance
+        speed_mps = state.get("speed_mps")
+        speed_ceiling = state.get("speed_ceiling_mps")
+        if speed_mps is not None and speed_ceiling is not None:
+            try:
+                s = float(speed_mps)
+                sc = float(speed_ceiling)
+                if sc > 0 and s > sc * 1.05:
+                    return {
+                        "intent": "GOVERN_SPEED",
+                        "directive": f"OVER SPEED LIMIT (Current: {s:.1f} m/s > Ceiling: {sc:.1f} m/s). Select decelerating trajectory to match limit.",
+                        "target_max_speed": sc,
+                    }
+            except (ValueError, TypeError):
+                pass
+
+        # 3. Hazard Avoidance
+        candidates = state.get("candidates", {})
+        if isinstance(candidates, dict):
+            has_collision = any(v and len(v) >= 5 and v[4] for v in candidates.values())
+            has_safe = any(v and len(v) >= 5 and not v[4] for v in candidates.values())
+            if has_collision and has_safe:
+                return {
+                    "intent": "HAZARD_AVOID",
+                    "directive": "COLLISION DETECTED on path. Select safe alternative lateral lane or brake.",
+                    "must_avoid_collision": True,
+                }
+
+        return {
+            "intent": "SAFE_CRUISE",
+            "directive": "Clear path ahead. Minimize route error and maintain efficient cruising speed.",
+        }
+
     def classify_jev(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle Jev-compatible structured classification request from official JevPilot frontend."""
+        """Handle Jev-compatible structured classification request from JevPilot 2.0 frontend with Tier 1/2 reasoning."""
         state = payload.get("state", {})
         questions = payload.get("questions", {})
         answers: Dict[str, Any] = {}
         total_input_tokens = 0
+
+        # Tier 1 Strategic Maneuver analysis
+        tier1 = self._determine_tier1_maneuver(state)
+        strategic_intent = tier1["intent"]
+        strategic_directive = tier1["directive"]
 
         for q_key, q_data in questions.items():
             instructions = q_data.get("instructions", "Choose optimal driving option.")
@@ -331,28 +392,65 @@ class DecisionEngine:
             if not options:
                 continue
 
+            candidates = state.get("candidates", {}) if isinstance(state, dict) else {}
+
             if self.use_mock or self.model is None:
-                # Mock: pick candidate path that has no predicted collision
-                candidates = state.get("candidates", {}) if isinstance(state, dict) else {}
+                # Hierarchical Mock: Apply Tier 1 constraints
                 best_choice = options[0]["id"]
+                ranked_candidates = []
+
                 for opt in options:
                     cand_vec = candidates.get(opt["id"])
                     # candidates vector: [speed, steer, route_error, offroad_fraction, collision, stop_at_line]
-                    if cand_vec and len(cand_vec) >= 5 and not cand_vec[4]:  # collision is false
-                        best_choice = opt["id"]
-                        break
-                probs = {opt["id"]: 1.0 / len(options) for opt in options}
-                probs[best_choice] = max(probs[best_choice], 0.75)
+                    if not cand_vec or len(cand_vec) < 6:
+                        score_val = 0.0
+                    else:
+                        speed, steer, r_err, offroad, collision, stop_line = cand_vec[0], cand_vec[1], cand_vec[2], cand_vec[3], cand_vec[4], cand_vec[5]
+                        if collision:
+                            score_val = -1000.0
+                        elif offroad > 0.1:
+                            score_val = -500.0
+                        elif strategic_intent == "YIELD_RED_LIGHT":
+                            # Heavily prioritize stopping at line with 0 velocity
+                            score_val = 100.0 if stop_line else (-200.0 - speed * 10)
+                        elif strategic_intent == "GOVERN_SPEED":
+                            sc = tier1.get("target_max_speed", 20.0)
+                            score_val = (50.0 - abs(speed - sc) * 5.0) - r_err * 2.0
+                        else:
+                            score_val = 10.0 + speed * 2.0 - r_err * 5.0
+                    ranked_candidates.append((opt["id"], score_val))
+
+                ranked_candidates.sort(key=lambda x: x[1], reverse=True)
+                best_choice = ranked_candidates[0][0]
+
+                probs = {opt["id"]: 0.05 for opt in options}
+                probs[best_choice] = max(0.80, 1.0 - 0.05 * (len(options) - 1))
                 norm = sum(probs.values())
-                probs = {k: v / norm for k, v in probs.items()}
+                probs = {k: round(v / norm, 4) for k, v in probs.items()}
+
                 answers[q_key] = {"choice": best_choice, "probabilities": probs}
                 total_input_tokens += 120
             else:
+                # Hierarchical Neural SemIf: Condition instructions with Tier 1 Strategic Directive
+                enhanced_instructions = f"STRATEGIC DIRECTIVE: {strategic_directive}\n{instructions}"
+                
+                # Annotate option descriptions with vehicle vector telemetry
+                annotated_options = []
+                for opt in options:
+                    cand_vec = candidates.get(opt["id"])
+                    if cand_vec and len(cand_vec) >= 6:
+                        sp, st, re, of, col, stp = cand_vec[:6]
+                        tag = f"speed: {sp:.1f}m/s, steer: {st:+.2f}, collision: {col}, stop_at_line: {stp}"
+                        desc = f"{opt['description']} [{tag}]"
+                    else:
+                        desc = opt["description"]
+                    annotated_options.append({"id": opt["id"], "description": desc})
+
                 row = {
                     "id": f"jev_{int(time.time() * 1000)}_{q_key}",
                     "state": state,
-                    "question": instructions,
-                    "options": options,
+                    "question": enhanced_instructions,
+                    "options": annotated_options,
                 }
                 prior = self.prior_logits[:len(options)] if len(options) <= len(self.prior_logits) else None
                 scored = score(
@@ -382,6 +480,11 @@ class DecisionEngine:
             "usage": {
                 "input_tokens": total_input_tokens,
                 "output_tokens": 0,
+            },
+            "meta": {
+                "tier1_maneuver": strategic_intent,
+                "tier1_directive": strategic_directive,
+                "hierarchical": True,
             },
         }
 
