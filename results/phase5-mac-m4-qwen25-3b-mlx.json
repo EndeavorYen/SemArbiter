@@ -1,0 +1,70 @@
+{
+  "hardware": {
+    "host": "SimondeMac-mini.local",
+    "os": "Darwin",
+    "release": "27.0.0",
+    "cpu": "arm",
+    "gpu": "Apple M4",
+    "architecture": "applegpu_g16g",
+    "total_ram_gb": 16.0
+  },
+  "model": "mlx-community/Qwen2.5-3B-Instruct-4bit",
+  "iterations": 20,
+  "load_seconds": 113.20518929199898,
+  "model_resident_ram_mb": 1655.7734451293945,
+  "inference_peak_ram_mb": 1958.6804313659668,
+  "total_latency_ms": {
+    "mean": 304.5787250994181,
+    "p50": 304.6386670030188,
+    "p90": 304.84691700257827,
+    "p99": 304.9137499911012,
+    "min": 304.09462499665096,
+    "max": 304.9137499911012
+  },
+  "forward_latency_ms": {
+    "mean": 303.82420614987495,
+    "p50": 303.8605000037933,
+    "p90": 304.0669999900274,
+    "p99": 304.08062499191146,
+    "min": 303.3424169989303,
+    "max": 304.08062499191146
+  },
+  "throughput_p50_decisions_per_sec": 3.2825773886086846,
+  "last_decision_sample": {
+    "id": "live-m4-test-1",
+    "option_ids": [
+      "refund",
+      "escalate",
+      "deny"
+    ],
+    "probabilities": [
+      3.0590222306327487e-07,
+      0.9999996814716843,
+      1.262609265589516e-08
+    ],
+    "option_logits": [
+      34.4375,
+      49.4375,
+      31.25
+    ],
+    "calibrated_logits": [
+      34.4375,
+      49.4375,
+      31.25
+    ],
+    "temperature": 1.0,
+    "prior_debiased": false,
+    "engine": "mlx",
+    "input_tokens": 149,
+    "forward_seconds": 0.30408062499191146,
+    "total_seconds": 0.30479029200796504,
+    "prompt_sha256": "5620542e288bcb07a6998da6489781fcee24a606a9a2c485b84c2f1536e09fa7",
+    "prompt_version": "direct-options-v1",
+    "model": {
+      "source": "mlx-community/Qwen2.5-3B-Instruct-4bit",
+      "engine": "mlx-apple-silicon"
+    },
+    "readout": "mlx-apple-silicon unified memory zero-copy slot logits",
+    "probability_status": "conditional option score; uncalibrated as decision confidence"
+  }
+}

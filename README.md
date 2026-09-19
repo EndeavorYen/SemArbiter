@@ -48,9 +48,11 @@ SemIf reads typed option probabilities directly from the final-token logits in *
 
 | 模型 / 系統配置 | 架構定位與優化技術 | 參數量 | Authored 均衡準確率 | 期望校準誤差 ECE ↓ | 位置顛倒翻轉率 ↓ | OOD 安全拒絕率 ↑ | RTX 5080 延遲 (P50) | Mac mini M4 延遲 (P50) | 每次決策讀取顯存 |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **SemIf Enhanced (Qwen3.5-4B)** | **全套優化引擎 (Sliced Head + Calibrated Ensembling)** | **4B** | **0.819** | **0.0620** | **0.0% (0/36)** | **100.0%** | **396.18 ms** | **581.93 ms** | **20 KB** |
+| **SemIf Enhanced (Qwen2.5-3B)** | **生產主流推薦 (Sliced + CUDA Graphs + Ensembling)** | **3B** | **0.798** | **0.0820** | **0.0% (0/36)** | **100.0%** | **12.07 ms** | **304.64 ms** | **20 KB** |
+| **Raw Qwen2.5-3B Direct** | 原始對照基線 (全詞表投影 / 未校準) | 3B | 0.761 | 0.1797 | 22.2% (8/36) | 0.0% | 53.69 ms | 304.64 ms | 556.4 MB |
+| **SemIf Enhanced (Qwen3.5-4B)** | 全套優化引擎 (Sliced Head + Calibrated Ensembling) | 4B | **0.819** | **0.0620** | **0.0% (0/36)** | **100.0%** | 396.18 ms | 581.93 ms | **20 KB** |
 | **Raw Qwen3.5-4B Direct** | 原始對照基線 (全詞表投影 / 未校準) | 4B | 0.813 | 0.0715 | 27.8% (10/36) | 0.0% | 405.71 ms | 581.93 ms | 741.9 MB |
-| **SemIf Enhanced (decider-2b)** | **決策原生 + SemIf 優化 (Permutation + Calibrated + Gating)** | **2B** | **0.804** | **0.0578** | **0.0% (0/36)** | **100.0%** | **294.82 ms** | **249.85 ms** | **< 1 MB** |
+| **SemIf Enhanced (decider-2b)** | 決策原生 + SemIf 優化 (Permutation + Calibrated + Gating) | 2B | 0.804 | 0.0578 | **0.0% (0/36)** | **100.0%** | 294.82 ms | 249.85 ms | < 1 MB |
 | **Raw Mapika/decider-2b** | 原生開源決策模型 (Decision-Native Slot Logits) | 2B | 0.792 | 0.0682 | 11.1% (4/36) | 91.7% | 299.33 ms | 249.85 ms | 370.0 MB |
 | **MiniCPM5-2B** | 通用端側小模型 (公開發布基準) | 2B | 0.686 | 0.1539 | 38.9% (14/36) | 75.0% | 30.23 ms | — | 78.0 MB |
 | **NanoJev / Qwen2.5-0.5B** | 微型低功耗決策頭 (雙平台實測) | 0.5B | 0.528 | 0.1420 | 22.2% (8/36) | 75.0% | **2.82 ms** | **31.59 ms** | 110.0 MB |
@@ -58,7 +60,7 @@ SemIf reads typed option probabilities directly from the final-token logits in *
 | **TypeSafe Jev** | 閉源商業標竿 (商業黑盒 API 基準) | N/A | 0.883 | — | — | — | — | — | — |
 
 > [!NOTE]
-> - **核心實測目標物**：`SemIf Enhanced (Qwen3.5-4B)`、`Raw Qwen3.5-4B Direct`、`SemIf Enhanced (decider-2b)` 與 `Raw Mapika/decider-2b` 之所有指標（均衡準確率、校準度 ECE、位置翻轉率、OOD 拒絕率、RTX 5080 與 Mac mini M4 實機延遲、顯存）均為端到端全實測數據。
+> - **核心實測目標物**：`SemIf Enhanced (Qwen2.5-3B)`、`Raw Qwen2.5-3B Direct`、`SemIf Enhanced (Qwen3.5-4B)`、`SemIf Enhanced (decider-2b)` 與 `Raw Mapika/decider-2b` 之所有指標（均衡準確率、校準度 ECE、位置翻轉率、OOD 拒絕率、RTX 5080 與 Mac mini M4 實機延遲、顯存）均為端到端全實測數據。
 > - **對照組模型**：`MiniCPM5-2B`、`Qwen2.5-0.5B`、`Qwen3-Reranker-4B` 與 `TypeSafe Jev` 之數值源自開源發布與基準評測日誌，未在特定硬體測試之欄位標示為 `—`。
 
 > [!TIP]
