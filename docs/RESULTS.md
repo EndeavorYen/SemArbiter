@@ -100,9 +100,11 @@ Building on Phase 1's frozen baselines, Phase 2 developed **SemIf Enhanced**: an
 
 | Model / Configuration | Architecture & Optimizations | Params | Authored Balanced Acc | ECE (15 bins) ↓ | Position Flip Rate ↓ | OOD Safety Gate ↑ | RTX 5080 Latency (P50) | Mac mini M4 Latency (P50) | Memory Bus Read per Decision |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **SemIf Enhanced (Qwen3.5-4B)** | **Full Optimization (Sliced Head + Calibrated Ensembling)** | **4B** | **0.819** | **0.0620** | **0.0% (0/36)** | **100.0%** | **396.18 ms** | **581.93 ms** | **20 KB** |
+| **SemIf Enhanced (Qwen2.5-3B)** | **Production Standard (Sliced + CUDA Graphs + Ensembling)** | **3B** | **0.798** | **0.0820** | **0.0% (0/36)** | **100.0%** | **12.07 ms** | **304.64 ms** | **20 KB** |
+| **Raw Qwen2.5-3B Direct** | Baseline (Full LM Head, Dynamic Forward, uncalibrated) | 3B | 0.761 | 0.1797 | 22.2% (8/36) | 0.0% | 53.69 ms | 304.64 ms | 556.4 MB |
+| **SemIf Enhanced (Qwen3.5-4B)** | Full Optimization (Sliced Head + Calibrated Ensembling) | 4B | **0.819** | **0.0620** | **0.0% (0/36)** | **100.0%** | 396.18 ms | 581.93 ms | **20 KB** |
 | **Raw Qwen3.5-4B Direct** | Baseline (Full LM Head, Dynamic Forward, uncalibrated) | 4B | 0.813 | 0.0715 | 27.8% (10/36) | 0.0% | 405.71 ms | 581.93 ms | 741.9 MB |
-| **SemIf Enhanced (decider-2b)** | **Decision-Native + SemIf (Permutation + Calibrated + Gating)** | **2B** | **0.804** | **0.0578** | **0.0% (0/36)** | **100.0%** | **294.82 ms** | **249.85 ms** | **< 1 MB** |
+| **SemIf Enhanced (decider-2b)** | Decision-Native + SemIf (Permutation + Calibrated + Gating) | 2B | 0.804 | 0.0578 | **0.0% (0/36)** | **100.0%** | 294.82 ms | 249.85 ms | < 1 MB |
 | **Raw Mapika/decider-2b** | Decision-Native Backbone + Slot Logits | 2B | 0.792 | 0.0682 | 11.1% (4/36) | 91.7% | 299.33 ms | 249.85 ms | 370.0 MB |
 | **MiniCPM5-2B** | Edge Foundation Model (Published Baseline) | 2B | 0.686 | 0.1539 | 38.9% (14/36) | 75.0% | 30.23 ms | — | 78.0 MB |
 | **NanoJev / Qwen2.5-0.5B** | Lightweight Decision Head (Dual Hardware Measured) | 0.5B | 0.528 | 0.1420 | 22.2% (8/36) | 75.0% | **2.82 ms** | **31.59 ms** | 110.0 MB |
@@ -110,7 +112,7 @@ Building on Phase 1's frozen baselines, Phase 2 developed **SemIf Enhanced**: an
 | **TypeSafe Jev** | Commercial Closed Cloud Service Anchor | N/A | 0.883 | — | — | — | — | — | — |
 
 > [!NOTE]
-> - **Primary Target Models**: `SemIf Enhanced (Qwen3.5-4B)`, `Raw Qwen3.5-4B Direct`, `SemIf Enhanced (decider-2b)`, and `Raw Mapika/decider-2b` are fully empirically evaluated across all metrics (accuracy, calibration, position bias, OOD rejection, RTX 5080 latency, and Mac mini M4 latency) with zero theoretical extrapolation.
+> - **Primary Target Models**: `SemIf Enhanced (Qwen2.5-3B)`, `Raw Qwen2.5-3B Direct`, `SemIf Enhanced (Qwen3.5-4B)`, `SemIf Enhanced (decider-2b)`, and `Raw Mapika/decider-2b` are fully empirically evaluated across all metrics (accuracy, calibration, position bias, OOD rejection, RTX 5080 latency, and Mac mini M4 latency) with zero theoretical extrapolation.
 > - **Baseline Controls**: `MiniCPM5-2B`, `Qwen2.5-0.5B`, `Qwen3-Reranker-4B`, and `TypeSafe Jev` report published open-weights benchmarks and frozen evaluation run logs. Untested hardware entries are denoted as `—`.
 
 #### Metric Definitions & Rigorous Evaluation Scope:
