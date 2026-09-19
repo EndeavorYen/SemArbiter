@@ -346,7 +346,30 @@ class DecisionEngine:
             except (ValueError, TypeError):
                 pass
 
-        # 3. Hazard Avoidance
+        # 3. Pedestrian Detection (Jaywalking / Crosswalk)
+        ped = state.get("pedestrian")
+        if isinstance(ped, dict):
+            p_dist = ped.get("distance_m", 100.0)
+            if p_dist is not None and p_dist <= 35.0:
+                return {
+                    "intent": "YIELD_PEDESTRIAN",
+                    "directive": f"PEDESTRIAN DETECTED at {p_dist:.1f}m ahead. Yield immediately and bring vehicle to full stop to prevent casualty.",
+                    "target_stop": True,
+                    "critical_safety": True,
+                }
+
+        # 4. Roadside Parked Hazard / Lane Blockage
+        roadside = state.get("roadside_obstacle")
+        if isinstance(roadside, dict):
+            r_dist = roadside.get("distance_m", 100.0)
+            if r_dist is not None and r_dist <= 40.0:
+                return {
+                    "intent": "AVOID_ROADSIDE_OBSTACLE",
+                    "directive": f"ROADSIDE OBSTACLE ({roadside.get('type', 'hazard')}) at {r_dist:.1f}m. Choose lateral clearance trajectory to safely pass.",
+                    "must_avoid_collision": True,
+                }
+
+        # 5. General Collision / Hazard Avoidance
         candidates = state.get("candidates", {})
         if isinstance(candidates, dict):
             has_collision = any(v and len(v) >= 5 and v[4] for v in candidates.values())
@@ -354,7 +377,7 @@ class DecisionEngine:
             if has_collision and has_safe:
                 return {
                     "intent": "HAZARD_AVOID",
-                    "directive": "COLLISION DETECTED on path. Select safe alternative lateral lane or brake.",
+                    "directive": "COLLISION DETECTED on forward path. Select safe alternative lateral lane or emergency brake.",
                     "must_avoid_collision": True,
                 }
 
@@ -404,10 +427,12 @@ class DecisionEngine:
 
             # Special case for motion (drive vs stop)
             if q_key == "motion":
-                if mode == "semif_hierarchical" and strategic_intent == "YIELD_RED_LIGHT":
+                if mode == "semif_hierarchical" and strategic_intent in ("YIELD_RED_LIGHT", "YIELD_PEDESTRIAN"):
                     inter = state.get("intersection", {}) if isinstance(state, dict) else {}
                     dist = inter.get("distance_to_line_m", 100) if isinstance(inter, dict) else 100
-                    best_choice = "stop" if (dist is not None and dist < 2.5) else "drive"
+                    ped = state.get("pedestrian", {}) if isinstance(state, dict) else {}
+                    p_dist = ped.get("distance_m", 100) if isinstance(ped, dict) else 100
+                    best_choice = "stop" if (dist is not None and dist < 2.5) or (p_dist is not None and p_dist < 8.0) else "drive"
                 else:
                     best_choice = "drive" if any(o["id"] == "drive" for o in options) else options[0]["id"]
                 probs = {opt["id"]: 0.05 for opt in options}
@@ -435,7 +460,7 @@ class DecisionEngine:
                         elif offroad > 0.1:
                             score_val = -500.0
                         elif mode == "flat":
-                            # Naive flat scoring: prioritizes speed, ignores red lights & speed limit
+                            # Naive flat scoring: prioritizes speed, ignores red lights, speed limits & pedestrians
                             score_val = speed * 10.0 - r_err * 2.0
                         elif mode == "heuristic":
                             # Geometric lane tracking: balance route error and progress
@@ -443,6 +468,12 @@ class DecisionEngine:
                         elif strategic_intent == "YIELD_RED_LIGHT":
                             # Heavily prioritize stopping at line with 0 velocity
                             score_val = 100.0 if stop_line else (-200.0 - speed * 10)
+                        elif strategic_intent == "YIELD_PEDESTRIAN":
+                            # Emergency yield for pedestrian: choose 0 velocity / maximum braking
+                            score_val = 150.0 if speed == 0.0 else (-300.0 - speed * 15.0)
+                        elif strategic_intent == "AVOID_ROADSIDE_OBSTACLE":
+                            # Favor trajectory that nudges away from roadside obstacle
+                            score_val = 20.0 + speed * 1.5 - abs(steer) * 10.0 - r_err * 2.0
                         elif strategic_intent == "GOVERN_SPEED":
                             sc = tier1.get("target_max_speed", 20.0)
                             score_val = (50.0 - abs(speed - sc) * 5.0) - r_err * 2.0
