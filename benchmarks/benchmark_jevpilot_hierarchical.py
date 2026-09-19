@@ -33,7 +33,12 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from demo.server import DecisionEngine
-from semif_phase1.trajectory_sampler import candidates_as_vecs, candidates_meta, sample_trajectories
+from semif_phase1.trajectory_sampler import (
+    VECTOR_INSTRUCTIONS,
+    candidates_as_vecs,
+    candidates_meta,
+    sample_trajectories,
+)
 from benchmarks.driving_quality import compare_driving, driving_quality
 from benchmarks.sdi import (
     SEMANTIC_EXCLUSIVE_SCENARIOS,
@@ -440,7 +445,7 @@ def run_jevpilot2_episode(
                     },
                     "vector": {
                         "type": "choice",
-                        "instructions": "Choose a safe driving path.",
+                        "instructions": VECTOR_INSTRUCTIONS,
                         "criteria": {k: None for k in obs["candidates"].keys()},
                     }
                 }

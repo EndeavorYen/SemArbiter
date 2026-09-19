@@ -13,7 +13,7 @@ Lead with the answer. Then say why, in short sentences. A longer sentence is fin
 
 # Evaluation honesty
 
-JevPilot executors are Heuristic and Flat SemIf only. Both see the same sampled trajectories this frame. SemIf uses sliced-head readout and n-way prior. Hierarchical-as-pruning was retired for JevPilot (insight in docs/tutorials/10_jev_vs_classifier_io.md). Do not delete trajectories with a coarse tree. Constrain output schema, not the candidate set.
+JevPilot executors are Heuristic and Flat SemIf only. Both see the same sampled trajectories this frame. SemIf uses sliced-head readout and n-way prior. Hierarchical-as-pruning was retired for JevPilot (insight in docs/tutorials/10_jev_vs_classifier_io.md). Do not delete trajectories with a coarse tree. Constrain output schema, not the candidate set. Web and the Python loop share the option contract (no signal-injected candidates, six-column vectors, `VECTOR_INSTRUCTIONS`); they do not share a world. Official scores are the closed loop.
 
 Keep geometric slow and stop trajectories in the pool for every mode. Do not inject a stop trajectory because the light is red. Do not strip brake as an action to make Heuristic look worse.
 
