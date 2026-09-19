@@ -16,7 +16,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -29,6 +29,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "src"))
 
+from semif_phase1.action_tree import Branch, Leaf, Node, sensors_corrupt, walk_action_tree
+from semif_phase1.trajectory_sampler import partition_ids
 from semif_phase1.core import LETTERS, apply_prior_calibration, null_prompt_row, softmax
 from semif_phase1.direct import score
 from semif_phase1.gating import compute_free_energy, gate_decision
@@ -50,6 +52,145 @@ ACTION_IDS = [a["id"] for a in DRIVING_ACTIONS]
 # Precomputed empirical null prior for 5-option Qwen2.5-3B-Instruct
 DEFAULT_5OPT_PRIOR = [37.25, 26.375, 24.5, 23.25, 28.75]
 
+MANEUVERS = [
+    {"id": "proceed", "description": "Keep the current lane and a useful speed."},
+    {"id": "stop", "description": "Come to a halt for a red or yellow signal, a person in the path, or an unmarked yield."},
+    {"id": "go_around", "description": "Move laterally to pass a blockage, follow a detour, or pull aside."},
+    {"id": "slow", "description": "Reduce speed to the posted limit without a full stop."},
+    {"id": "fail_safe", "description": "Sensor data is corrupted or out of distribution; refuse the observation."},
+]
+MANEUVER_IDS = [m["id"] for m in MANEUVERS]
+MANEUVER_BY_ID = {m["id"]: m for m in MANEUVERS}
+
+def build_drive_tree(candidates: Dict[str, Any], meta: Optional[Dict[str, Any]] = None) -> Node:
+    """Bucket this frame's sampled trajectories. Leaves are sampled ids."""
+    halt, lateral, lane = partition_ids(candidates, meta)
+    if not lane:
+        lane = list(candidates.keys()) or ["t00"]
+    slow_ids = tuple(halt) if halt else tuple(lane)
+    lat_ids = tuple(lateral) if lateral else tuple(lane)
+    lane_ids = tuple(lane)
+    speed_node = Node(
+        id="speed",
+        question="Is current speed above the posted ceiling? Choose slow only if speed_mps > speed_ceiling_mps.",
+        evidence_keys=("speed_mps", "speed_ceiling_mps"),
+        skip_if_empty=False,
+        default_branch="cruise",
+        branches=(
+            Branch("slow", "speed_mps is greater than speed_ceiling_mps.", Leaf(slow_ids)),
+            Branch("cruise", "speed_mps is at or under the posted ceiling.", Leaf(lane_ids)),
+        ),
+    )
+    around_node = Node(
+        id="around",
+        question="Is a lateral move required? Choose go_around only for a detour, parked hazard, or emergency vehicle.",
+        evidence_keys=("construction", "roadside_obstacle", "emergency_vehicle"),
+        skip_if_empty=True,
+        default_branch="stay_in_lane",
+        branches=(
+            Branch("go_around", "A detour, parked hazard, or siren requires moving aside.", Leaf(lat_ids)),
+            Branch("stay_in_lane", "No blockage requiring a lateral move.", speed_node),
+        ),
+    )
+    halt_next: Any = Leaf(tuple(halt)) if halt else around_node
+    return Node(
+        id="halt",
+        question="Must the vehicle halt now? Choose must_stop only for a red or yellow signal not yet cleared, a person in the path, or an unmarked yield.",
+        evidence_keys=("intersection", "pedestrian", "other_vehicle"),
+        skip_if_empty=True,
+        default_branch="keep_moving",
+        branches=(
+            Branch("must_stop", "Red or yellow signal, a person in the path, or an unmarked yield.", halt_next),
+            Branch("keep_moving", "No halt required for a signal or a person.", around_node),
+        ),
+    )
+
+
+DRIVE_TREE = build_drive_tree(
+    {"t00": [10.0, 0.0, 0.0, 0.0, False, False], "t01": [0.0, 0.0, 0.0, 0.0, False, True]},
+    {"t01": {"end_speed": 0.0, "steer": 0.0, "stop_at_line": True}},
+)
+
+INTENT_TO_MANEUVER = {
+    "OOD_FAIL_SAFE": "fail_safe",
+    "YIELD_RED_LIGHT": "stop",
+    "YIELD_PEDESTRIAN": "stop",
+    "YIELD_UNMARKED_PRIORITY": "stop",
+    "FOLLOW_DETOUR": "go_around",
+    "GIVE_WAY_EMERGENCY": "go_around",
+    "AVOID_ROADSIDE_OBSTACLE": "go_around",
+    "HAZARD_AVOID": "go_around",
+    "GOVERN_SPEED": "slow",
+    "SAFE_CRUISE": "proceed",
+    "CRUISE": "proceed",
+}
+
+
+def coarse_maneuver(intent: str) -> str:
+    return INTENT_TO_MANEUVER.get(intent, "proceed")
+
+
+def _finite_or_corrupt(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str) and value.upper() in {"ANOMALY_CORRUPTED", "NAN", "INFINITY", "-INFINITY"}:
+        return True
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return False
+    return math.isnan(number) or math.isinf(number)
+
+
+def rule_maneuver_tree(state: Dict[str, Any]) -> Tuple[str, List[str]]:
+    """Oracle walk for tests and mock. Same splits as the neural tree."""
+    path: List[str] = []
+    if state.get("anomaly") is not None or _finite_or_corrupt(state.get("speed_mps")):
+        path.append("sensor_bad")
+        return "fail_safe", path
+    path.append("sensor_ok")
+
+    intersection = state.get("intersection") if isinstance(state.get("intersection"), dict) else {}
+    signal = str(intersection.get("signal") or "").lower()
+    entered = bool(intersection.get("already_entered"))
+    stopped = bool(intersection.get("stop_completed"))
+    pedestrian = state.get("pedestrian") if isinstance(state.get("pedestrian"), dict) else None
+    other = state.get("other_vehicle") if isinstance(state.get("other_vehicle"), dict) else None
+    ped_near = bool(pedestrian and pedestrian.get("distance_m") is not None and pedestrian["distance_m"] <= 40)
+    unmarked = str(intersection.get("control") or "").lower() in {"unmarked", "none", ""}
+    other_arriving = bool(other and other.get("arriving") and (other.get("distance_m") or 99) <= 30)
+    if (signal in {"red", "yellow"} and not entered and not stopped) or ped_near or (unmarked and other_arriving):
+        path.append("must_stop")
+        return "stop", path
+    path.append("keep_moving")
+
+    construction = state.get("construction") if isinstance(state.get("construction"), dict) else None
+    roadside = state.get("roadside_obstacle") if isinstance(state.get("roadside_obstacle"), dict) else None
+    emergency = state.get("emergency_vehicle") if isinstance(state.get("emergency_vehicle"), dict) else None
+    around = False
+    if construction and construction.get("distance_m") is not None and construction["distance_m"] <= 45:
+        around = True
+    if roadside and roadside.get("distance_m") is not None and roadside["distance_m"] <= 45:
+        around = True
+    if emergency and emergency.get("siren") and emergency.get("behind", True):
+        around = True
+    if around:
+        path.append("go_around")
+        return "go_around", path
+    path.append("stay_in_lane")
+
+    speed = state.get("speed_mps")
+    ceiling = state.get("speed_ceiling_mps")
+    try:
+        speeding = float(speed) > float(ceiling) * 1.05
+    except (TypeError, ValueError):
+        speeding = False
+    if speeding:
+        path.append("slow")
+        return "slow", path
+    path.append("proceed")
+    return "proceed", path
+
 
 class DecisionEngine:
     """Manages model loading, CUDA graphs, prior calibration, and real-time execution."""
@@ -69,6 +210,7 @@ class DecisionEngine:
         self.device = None
         self.graph_runner = None
         self.prior_logits: List[float] = DEFAULT_5OPT_PRIOR
+        self.priors_by_n: Dict[int, List[float]] = {len(DEFAULT_5OPT_PRIOR): list(DEFAULT_5OPT_PRIOR)}
         self.stats = {
             "total_decisions": 0,
             "total_latency_ms": 0.0,
@@ -114,6 +256,7 @@ class DecisionEngine:
             null_row = null_prompt_row(options_count=len(DRIVING_ACTIONS))
             res = score(self.model, self.tokenizer, null_row, {}, sliced_head=True)
             self.prior_logits = res["option_logits"]
+            self.priors_by_n[len(self.prior_logits)] = list(self.prior_logits)
             logger.info(f"5-option null prior calibrated: {self.prior_logits}")
         except Exception as e:
             logger.warning(f"Failed to auto-compute null prior: {e}. Using precomputed prior: {self.prior_logits}")
@@ -128,6 +271,28 @@ class DecisionEngine:
             except Exception as e:
                 logger.warning(f"CUDA Graph warmup skipped or failed: {e}. Falling back to dynamic sliced LM head.")
                 self.graph_runner = None
+
+    def _prior_for(self, n: int) -> Optional[List[float]]:
+        """Return an n-dimensional null prior. Never slice a mismatched 5-opt prior."""
+        if n < 2:
+            return None
+        cached = self.priors_by_n.get(n)
+        if cached is not None and len(cached) == n:
+            return cached
+        if self.use_mock or self.model is None or self.tokenizer is None:
+            return None
+        try:
+            null_row = null_prompt_row(options_count=n)
+            res = score(self.model, self.tokenizer, null_row, {}, sliced_head=True)
+            logits = list(res["option_logits"])
+            if len(logits) != n:
+                return None
+            self.priors_by_n[n] = logits
+            logger.info(f"{n}-option null prior calibrated: {logits}")
+            return logits
+        except Exception as e:
+            logger.warning(f"Failed to calibrate {n}-option null prior: {e}")
+            return None
 
     def build_driving_row(self, telemetry: Dict[str, Any]) -> Dict[str, Any]:
         """Convert driving state into SemIf standard categorical decision row."""
@@ -314,6 +479,57 @@ class DecisionEngine:
         if not isinstance(state, dict):
             return {"intent": "CRUISE", "directive": "Standard cruise and lane tracking."}
 
+        anomaly = state.get("anomaly")
+        speed_raw = state.get("speed_mps")
+        speed_corrupt = False
+        try:
+            if speed_raw is not None and (math.isnan(float(speed_raw)) or math.isinf(float(speed_raw))):
+                speed_corrupt = True
+        except (TypeError, ValueError):
+            speed_corrupt = True
+        if anomaly is not None or speed_corrupt:
+            return {
+                "intent": "OOD_FAIL_SAFE",
+                "directive": "SENSOR OOD / free-energy spike. Reject the observation and fail-closed to a stop.",
+                "target_stop": True,
+                "ood_fail_safe": True,
+            }
+
+        emer = state.get("emergency_vehicle")
+        if isinstance(emer, dict) and emer.get("siren"):
+            behind = bool(emer.get("behind", True))
+            e_dist = emer.get("distance_m", 99.0)
+            if behind and e_dist is not None and e_dist <= 40.0:
+                return {
+                    "intent": "GIVE_WAY_EMERGENCY",
+                    "directive": f"EMERGENCY VEHICLE {e_dist}m behind with siren. Pull right and yield.",
+                    "must_avoid_collision": True,
+                    "pull_right": True,
+                }
+
+        cons = state.get("construction")
+        if isinstance(cons, dict):
+            c_dist = cons.get("distance_m", 100.0)
+            if c_dist is not None and c_dist <= 45.0:
+                return {
+                    "intent": "FOLLOW_DETOUR",
+                    "directive": f"TEMPORARY CONSTRUCTION SIGN ({cons.get('sign', 'LANE_CLOSED')}) at {c_dist}m. Take the detour, do not stay in the closed ego lane.",
+                    "must_avoid_collision": True,
+                    "nudge_left": True,
+                }
+
+        other = state.get("other_vehicle")
+        intersection = state.get("intersection") if isinstance(state.get("intersection"), dict) else None
+        if isinstance(other, dict) and other.get("arriving"):
+            unmarked = bool(intersection and str(intersection.get("control", "")).lower() in ("unmarked", "none", ""))
+            o_dist = other.get("distance_m", 99.0)
+            if unmarked and o_dist is not None and o_dist <= 30.0:
+                return {
+                    "intent": "YIELD_UNMARKED_PRIORITY",
+                    "directive": f"UNMARKED JUNCTION: other vehicle arriving at {o_dist}m. Yield; do not take geometric right-of-way.",
+                    "target_stop": True,
+                }
+
         # 1. Traffic Light & Intersection Analysis
         intersection = state.get("intersection")
         if isinstance(intersection, dict):
@@ -323,12 +539,11 @@ class DecisionEngine:
             stop_completed = bool(intersection.get("stop_completed", False))
 
             if sig in ("red", "yellow") and not already_entered and not stop_completed:
-                if dist is None or dist <= 30.0:
-                    return {
-                        "intent": "YIELD_RED_LIGHT",
-                        "directive": f"RED/YELLOW SIGNAL ({sig.upper()}) at {dist}m ahead. Bring vehicle to a smooth halt before stop line (stop_at_line=True). Do not enter intersection.",
-                        "target_stop": True,
-                    }
+                return {
+                    "intent": "YIELD_RED_LIGHT",
+                    "directive": f"RED/YELLOW SIGNAL ({sig.upper()}) at {dist}m ahead. Bring vehicle to a smooth halt before stop line. Do not enter intersection.",
+                    "target_stop": True,
+                }
 
         # 2. Road Speed Ceiling Compliance
         speed_mps = state.get("speed_mps")
@@ -386,27 +601,187 @@ class DecisionEngine:
             "directive": "Clear path ahead. Minimize route error and maintain efficient cruising speed.",
         }
 
+    def _score_neural_options(
+        self,
+        state: Any,
+        instructions: str,
+        options: List[Dict[str, str]],
+        prior: Optional[List[float]],
+    ) -> Dict[str, Any]:
+        def _sanitize_finite_json(val: Any) -> Any:
+            if isinstance(val, float):
+                if math.isnan(val) or math.isinf(val):
+                    return "ANOMALY_CORRUPTED"
+                return val
+            if isinstance(val, dict):
+                return {k: _sanitize_finite_json(v) for k, v in val.items()}
+            if isinstance(val, list):
+                return [_sanitize_finite_json(v) for v in val]
+            return val
+
+        row = {
+            "id": f"jev_{int(time.time() * 1000)}",
+            "state": _sanitize_finite_json(state),
+            "question": instructions,
+            "options": options,
+        }
+        scored = score(
+            self.model,
+            self.tokenizer,
+            row,
+            {},
+            sliced_head=True,
+            prior_logits=prior,
+            graph_runner=self.graph_runner,
+        )
+        probs = {opt["id"]: p for opt, p in zip(options, scored["probabilities"])}
+        chosen_idx = max(range(len(scored["probabilities"])), key=scored["probabilities"].__getitem__)
+        return {
+            "choice": options[chosen_idx]["id"],
+            "probabilities": probs,
+            "input_tokens": scored.get("input_tokens", 150),
+        }
+
+    def _mock_branch_choice(self, question: str, options: List[Dict[str, str]], evidence: Dict[str, Any]) -> str:
+        ids = [opt["id"] for opt in options]
+        if "must_stop" in ids:
+            intersection = evidence.get("intersection") if isinstance(evidence.get("intersection"), dict) else {}
+            signal = str(intersection.get("signal") or "").lower()
+            entered = bool(intersection.get("already_entered"))
+            stopped = bool(intersection.get("stop_completed"))
+            ped = evidence.get("pedestrian") if isinstance(evidence.get("pedestrian"), dict) else None
+            other = evidence.get("other_vehicle") if isinstance(evidence.get("other_vehicle"), dict) else None
+            ped_near = bool(ped and ped.get("distance_m") is not None and ped["distance_m"] <= 40)
+            unmarked = str(intersection.get("control") or "").lower() in {"unmarked", "none", ""}
+            arriving = bool(other and other.get("arriving") and (other.get("distance_m") or 99) <= 30)
+            if (signal in {"red", "yellow"} and not entered and not stopped) or ped_near or (unmarked and arriving):
+                return "must_stop"
+            return "keep_moving"
+        if "go_around" in ids:
+            for key in ("construction", "roadside_obstacle"):
+                item = evidence.get(key)
+                if isinstance(item, dict) and item.get("distance_m") is not None and item["distance_m"] <= 45:
+                    return "go_around"
+            emergency = evidence.get("emergency_vehicle")
+            if isinstance(emergency, dict) and emergency.get("siren") and emergency.get("behind", True):
+                return "go_around"
+            return "stay_in_lane"
+        if "slow" in ids:
+            try:
+                if float(evidence.get("speed_mps")) > float(evidence.get("speed_ceiling_mps")) * 1.05:
+                    return "slow"
+            except (TypeError, ValueError):
+                pass
+            return "cruise"
+        return ids[0]
+
+    def _rank_vector_ids(self, action_ids: List[str], candidates: Dict[str, Any], mode: str) -> str:
+        best = action_ids[0]
+        best_score = -1e18
+        for opt_id in action_ids:
+            vec = candidates.get(opt_id)
+            if not vec or len(vec) < 6:
+                score_val = 0.0
+            else:
+                speed, _steer, r_err, offroad, collision = vec[0], vec[1], vec[2], vec[3], vec[4]
+                try:
+                    speed_f = 0.0 if speed is None or (isinstance(speed, float) and math.isnan(speed)) else float(speed)
+                except (TypeError, ValueError):
+                    speed_f = 0.0
+                if collision:
+                    score_val = -1000.0
+                elif offroad > 0.1:
+                    score_val = -500.0
+                elif mode == "heuristic":
+                    score_val = 10.0 + speed_f * 2.0 - abs(r_err) * 5.0
+                else:
+                    score_val = speed_f * 10.0 - r_err * 2.0
+            if score_val > best_score:
+                best_score = score_val
+                best = opt_id
+        return best
+
+    def _explain_action_tree(self, state: Dict[str, Any], candidates: Dict[str, Any]) -> Dict[str, Any]:
+        """Walk the tree for a rationale only. Does not pick or delete trajectories."""
+        all_ids = list(candidates.keys())
+        if sensors_corrupt(state):
+            return {
+                "path": [{"node": "sensor", "choice": "corrupt", "skipped": False, "parser": True}],
+                "leaf_set": all_ids,
+                "prunes": False,
+                "true_ood": True,
+            }
+
+        def score_branches(question: str, options: List[Dict[str, str]], evidence: Dict[str, Any]) -> str:
+            if self.use_mock or self.model is None:
+                return self._mock_branch_choice(question, options, evidence)
+            scored = self._score_neural_options(evidence, question, options, self._prior_for(len(options)))
+            return scored["choice"]
+
+        def ignore_leaves(action_ids: List[str]) -> str:
+            return action_ids[0] if action_ids else (all_ids[0] if all_ids else "t00")
+
+        meta = state.get("candidate_meta") if isinstance(state, dict) else None
+        tree = build_drive_tree(candidates, meta if isinstance(meta, dict) else None)
+        walked = walk_action_tree(tree, state, score_branches, ignore_leaves)
+        return {
+            "path": walked.get("path") or [],
+            "leaf_set": all_ids,
+            "prunes": False,
+            "true_ood": False,
+            "explain_bucket": (walked.get("path") or [{}])[-1].get("choice") if walked.get("path") else None,
+        }
+
+    def _mock_probs(self, option_ids: List[str], choice: str) -> Dict[str, float]:
+        probs = {oid: 0.05 for oid in option_ids}
+        if option_ids:
+            probs[choice] = max(0.80, 1.0 - 0.05 * (len(option_ids) - 1))
+            norm = sum(probs.values())
+            probs = {k: round(v / norm, 4) for k, v in probs.items()}
+        return probs
+
     def classify_jev(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle Jev-compatible structured classification request with selectable strategy mode (flat vs semif_hierarchical)."""
+        """Jev classifier. Flat and SemIf share the same action ids. SemIf adds a maneuver class."""
         state = payload.get("state", {})
         questions = payload.get("questions", {})
-        mode = payload.get("mode", "semif_hierarchical")
+        mode = payload.get("mode", "flat")
+        if mode == "semif_hierarchical":
+            # Retired as a JevPilot executor. Same full-set scoring as flat.
+            mode = "flat"
+        raw_mode = bool(payload.get("raw_mode") or (isinstance(state, dict) and state.get("raw_mode")))
         answers: Dict[str, Any] = {}
         total_input_tokens = 0
 
-        # Tier 1 Strategic Maneuver analysis
+        rule_tier1 = self._determine_tier1_maneuver(state) if isinstance(state, dict) else {
+            "intent": "SAFE_CRUISE",
+            "directive": "Standard cruise and lane tracking.",
+        }
+
+        tree_path: List[Any] = []
+        tree_walk: Optional[Dict[str, Any]] = None
+        true_ood = sensors_corrupt(state) if isinstance(state, dict) else False
         if mode == "flat":
-            strategic_intent = "NONE (Flat 1-of-N)"
-            strategic_directive = "Naive unconstrained flat action selection."
-            tier1 = {"intent": strategic_intent, "directive": strategic_directive}
+            maneuver = None
+            strategic_intent = "FLAT_SEMIF"
+            strategic_directive = "Sliced-head SemIf over the shared action set. No classification tree."
         elif mode == "heuristic":
+            maneuver = None
             strategic_intent = "GEOMETRIC_HEURISTIC"
-            strategic_directive = "Pure geometric road-boundary following (baseline)."
-            tier1 = {"intent": strategic_intent, "directive": strategic_directive}
+            strategic_directive = "Pure geometric scoring over the shared action set."
         else:
-            tier1 = self._determine_tier1_maneuver(state)
-            strategic_intent = tier1["intent"]
-            strategic_directive = tier1["directive"]
+            if not isinstance(state, dict):
+                state = {}
+            candidates_now = state.get("candidates") if isinstance(state.get("candidates"), dict) else {}
+            tree_walk = self._explain_action_tree(state, candidates_now)
+            tree_path = tree_walk.get("path") or []
+            true_ood = bool(tree_walk.get("true_ood"))
+            maneuver = tree_walk.get("explain_bucket")
+            strategic_intent = "EXPLAIN_TREE"
+            strategic_directive = "Tree is rationale only. Score every sampled trajectory."
+            answers["maneuver"] = {
+                "choice": str(maneuver or "explain"),
+                "probabilities": self._mock_probs(["explain"], "explain"),
+            }
 
         for q_key, q_data in questions.items():
             instructions = q_data.get("instructions", "Choose optimal driving option.")
@@ -425,26 +800,31 @@ class DecisionEngine:
             if not options:
                 continue
 
-            # Special case for motion (drive vs stop)
-            if q_key == "motion":
-                if mode == "semif_hierarchical" and strategic_intent in ("YIELD_RED_LIGHT", "YIELD_PEDESTRIAN"):
-                    inter = state.get("intersection", {}) if isinstance(state, dict) else {}
-                    dist = inter.get("distance_to_line_m", 100) if isinstance(inter, dict) else 100
-                    ped = state.get("pedestrian", {}) if isinstance(state, dict) else {}
-                    p_dist = ped.get("distance_m", 100) if isinstance(ped, dict) else 100
-                    best_choice = "stop" if (dist is not None and dist < 2.5) or (p_dist is not None and p_dist < 8.0) else "drive"
-                else:
-                    best_choice = "drive" if any(o["id"] == "drive" for o in options) else options[0]["id"]
-                probs = {opt["id"]: 0.05 for opt in options}
-                probs[best_choice] = max(0.80, 1.0 - 0.05 * (len(options) - 1))
-                norm = sum(probs.values())
-                probs = {k: round(v / norm, 4) for k, v in probs.items()}
-                answers[q_key] = {"choice": best_choice, "probabilities": probs}
+            if q_key == "maneuver":
+                answers[q_key] = answers.get("maneuver") or {
+                    "choice": maneuver,
+                    "probabilities": self._mock_probs([o["id"] for o in options], str(maneuver or options[0]["id"])),
+                }
                 continue
 
             candidates = state.get("candidates", {}) if isinstance(state, dict) else {}
 
-            if self.use_mock or self.model is None:
+            if q_key == "vector" and true_ood and isinstance(candidates, dict) and candidates:
+                def _spd(cid: str) -> float:
+                    vec = candidates.get(cid) or [1e9]
+                    try:
+                        val = float(vec[0])
+                        return val if math.isfinite(val) else 1e9
+                    except (TypeError, ValueError, IndexError):
+                        return 1e9
+                slowest = min(candidates, key=_spd)
+                answers[q_key] = {
+                    "choice": slowest,
+                    "probabilities": self._mock_probs(list(candidates), slowest),
+                }
+                continue
+
+            if self.use_mock or self.model is None or mode == "heuristic":
                 best_choice = options[0]["id"]
                 ranked_candidates = []
 
@@ -455,30 +835,20 @@ class DecisionEngine:
                         score_val = 0.0
                     else:
                         speed, steer, r_err, offroad, collision, stop_line = cand_vec[0], cand_vec[1], cand_vec[2], cand_vec[3], cand_vec[4], cand_vec[5]
+                        try:
+                            speed_f = 0.0 if speed is None or (isinstance(speed, float) and math.isnan(speed)) else float(speed)
+                        except (TypeError, ValueError):
+                            speed_f = 0.0
+                        speed = speed_f
                         if collision:
                             score_val = -1000.0
                         elif offroad > 0.1:
                             score_val = -500.0
-                        elif mode == "flat":
-                            # Naive flat scoring: prioritizes speed, ignores red lights, speed limits & pedestrians
-                            score_val = speed * 10.0 - r_err * 2.0
                         elif mode == "heuristic":
-                            # Geometric lane tracking: balance route error and progress
-                            score_val = 10.0 + speed * 2.0 - r_err * 5.0
-                        elif strategic_intent == "YIELD_RED_LIGHT":
-                            # Heavily prioritize stopping at line with 0 velocity
-                            score_val = 100.0 if stop_line else (-200.0 - speed * 10)
-                        elif strategic_intent == "YIELD_PEDESTRIAN":
-                            # Emergency yield for pedestrian: choose 0 velocity / maximum braking
-                            score_val = 150.0 if speed == 0.0 else (-300.0 - speed * 15.0)
-                        elif strategic_intent == "AVOID_ROADSIDE_OBSTACLE":
-                            # Favor trajectory that nudges away from roadside obstacle
-                            score_val = 20.0 + speed * 1.5 - abs(steer) * 10.0 - r_err * 2.0
-                        elif strategic_intent == "GOVERN_SPEED":
-                            sc = tier1.get("target_max_speed", 20.0)
-                            score_val = (50.0 - abs(speed - sc) * 5.0) - r_err * 2.0
+                            score_val = 10.0 + speed * 2.0 - abs(r_err) * 5.0
                         else:
-                            score_val = 10.0 + speed * 2.0 - r_err * 5.0
+                            # Flat and mock SemIf share this ranker. SemIf's class is not a second scorer.
+                            score_val = speed * 10.0 - r_err * 2.0
                     ranked_candidates.append((opt["id"], score_val))
 
                 ranked_candidates.sort(key=lambda x: x[1], reverse=True)
@@ -492,49 +862,23 @@ class DecisionEngine:
                 answers[q_key] = {"choice": best_choice, "probabilities": probs}
                 total_input_tokens += 120
             else:
-                # Neural SemIf
-                if mode == "flat":
-                    final_instructions = instructions
-                    final_options = options
-                    use_prior = None  # No prior calibration for flat baseline
-                else:
-                    # Hierarchical Neural SemIf: Condition instructions with Tier 1 Strategic Directive
-                    final_instructions = f"STRATEGIC DIRECTIVE: {strategic_directive}\n{instructions}"
-                    final_options = []
-                    for opt in options:
-                        cand_vec = candidates.get(opt["id"])
-                        if cand_vec and len(cand_vec) >= 6:
-                            sp, st, re, of, col, stp = cand_vec[:6]
-                            tag = f"speed: {sp:.1f}m/s, steer: {st:+.2f}, collision: {col}, stop_at_line: {stp}"
-                            desc = f"{opt['description']} [{tag}]"
-                        else:
-                            desc = opt["description"]
-                        final_options.append({"id": opt["id"], "description": desc})
-                    use_prior = self.prior_logits[:len(options)] if len(options) <= len(self.prior_logits) else None
-
-                row = {
-                    "id": f"jev_{int(time.time() * 1000)}_{q_key}",
-                    "state": state,
-                    "question": final_instructions,
-                    "options": final_options,
-                }
-                scored = score(
-                    self.model,
-                    self.tokenizer,
-                    row,
-                    {},
-                    sliced_head=True,
-                    prior_logits=use_prior,
-                    graph_runner=self.graph_runner,
-                )
-                total_input_tokens += scored.get("input_tokens", 150)
-                prob_dict = {opt["id"]: p for opt, p in zip(options, scored["probabilities"])}
-                chosen_idx = max(range(len(scored["probabilities"])), key=scored["probabilities"].__getitem__)
-                best_choice = options[chosen_idx]["id"]
-
+                use_prior = self._prior_for(len(options))
+                final_instructions = instructions
+                final_options = []
+                for opt in options:
+                    cand_vec = candidates.get(opt["id"]) if isinstance(candidates, dict) else None
+                    if cand_vec and len(cand_vec) >= 6:
+                        sp, st, re, of, col, stp = cand_vec[:6]
+                        tag = f"speed: {sp:.1f}m/s, steer: {st:+.2f}, collision: {col}, stop_at_line: {stp}"
+                        desc = f"{opt['description']} [{tag}]"
+                    else:
+                        desc = opt["description"]
+                    final_options.append({"id": opt["id"], "description": desc})
+                neural_vec = self._score_neural_options(state, final_instructions, final_options, use_prior)
+                total_input_tokens += neural_vec["input_tokens"]
                 answers[q_key] = {
-                    "choice": best_choice,
-                    "probabilities": prob_dict,
+                    "choice": neural_vec["choice"],
+                    "probabilities": neural_vec["probabilities"],
                 }
 
         self.stats["total_decisions"] += 1
@@ -547,9 +891,20 @@ class DecisionEngine:
                 "output_tokens": 0,
             },
             "meta": {
+                "maneuver": maneuver,
+                "tree_path": tree_path,
+                "leaf_set": list((state.get("candidates") or {}).keys()) if isinstance(state, dict) else (tree_walk or {}).get("leaf_set"),
+                "tree_prunes": False,
                 "tier1_maneuver": strategic_intent,
                 "tier1_directive": strategic_directive,
-                "hierarchical": True,
+                "reason": rule_tier1.get("intent") if mode == "semif_hierarchical" else None,
+                "hierarchical": mode == "semif_hierarchical",
+                "raw_mode": raw_mode,
+                "true_ood": true_ood,
+                "ood_fail_safe": true_ood,
+                "bound_vector": False,
+                "semif_leaf": mode in {"flat", "semif_hierarchical"},
+                "seed": (state.get("seed") if isinstance(state, dict) else None),
             },
         }
 

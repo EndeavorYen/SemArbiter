@@ -9,6 +9,9 @@ Evaluates Heuristics, Raw Flat LLM, and SemIf Hierarchical Decider across
 5. cut_in_vehicle: Aggressive cut-in lead vehicle, testing collision avoidance.
 6. sharp_curve: High-curvature mountain/highway curve, testing trajectory tracking.
 7. sensor_anomaly: Corrupted sensor telemetry (NaN/noise) testing Helmholtz fail-safe.
+8. ambiguous_priority: Unmarked junction with a simultaneous arrival (semantic exclusive).
+9. construction_detour: Temporary lane-closed sign requiring a lateral detour.
+10. emergency_vehicle: Siren vehicle approaching from behind requiring a pull-over.
 """
 
 from __future__ import annotations
@@ -21,7 +24,7 @@ import random
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 # Ensure repository root in sys.path
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -30,6 +33,13 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from demo.server import DecisionEngine
+from semif_phase1.trajectory_sampler import candidates_as_vecs, candidates_meta, sample_trajectories
+from benchmarks.driving_quality import compare_driving, driving_quality
+from benchmarks.sdi import (
+    SEMANTIC_EXCLUSIVE_SCENARIOS,
+    scenario_seed,
+    semantic_driving_index,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("semif.benchmark.jevpilot2")
@@ -38,9 +48,11 @@ logger = logging.getLogger("semif.benchmark.jevpilot2")
 class JevPilot2Simulator:
     """Standardized 2D kinematic vehicle simulator for JevPilot 2.0 multi-scenario benchmark."""
 
-    def __init__(self, scenario_type: str, seed: int = 42):
+    def __init__(self, scenario_type: str, seed: int = 42, raw_mode: bool = False):
         self.scenario_type = scenario_type
-        self.rng = random.Random(seed)
+        self.seed = int(seed)
+        self.raw_mode = bool(raw_mode)
+        self.rng = random.Random(self.seed)
         self.reset()
 
     def reset(self):
@@ -59,8 +71,14 @@ class JevPilot2Simulator:
         self.pedestrian = None
         self.roadside_obstacle = None
         self.cut_in_vehicle = None
+        self.other_vehicle = None
+        self.construction = None
+        self.emergency_vehicle = None
         self.obstacle_z = 999.0
         self.has_anomaly = False
+        self.priority_violation = False
+        self.detour_violation = False
+        self.emergency_violation = False
 
         if self.scenario_type == "sharp_curve":
             self.track_curvature = 0.65 if self.rng.random() > 0.5 else -0.65
@@ -101,8 +119,39 @@ class JevPilot2Simulator:
                 "cut_in_time": 0.8,
             }
         elif self.scenario_type == "sensor_anomaly":
-            self.track_curvature = 0.1
+            self.track_curvature = 0.0
             self.has_anomaly = True
+        elif self.scenario_type == "ambiguous_priority":
+            self.track_curvature = 0.0
+            self.intersection = {
+                "control": "unmarked",
+                "stop_line_ahead_m": 48.0,
+                "signal": "none",
+                "stop_completed": False,
+                "already_entered": False,
+            }
+            self.other_vehicle = {
+                "z": 46.0,
+                "x": 3.4,
+                "speed_mps": 11.0,
+                "arriving": True,
+            }
+        elif self.scenario_type == "construction_detour":
+            self.track_curvature = 0.0
+            self.construction = {
+                "z": 42.0,
+                "x": 0.15,
+                "width": 2.4,
+                "sign": "LANE_CLOSED_FOLLOW_DETOUR",
+            }
+        elif self.scenario_type == "emergency_vehicle":
+            self.track_curvature = 0.0
+            self.emergency_vehicle = {
+                "z": -8.0,
+                "x": 0.0,
+                "speed_mps": 24.0,
+                "siren": True,
+            }
         else:
             self.track_curvature = 0.1 * (self.rng.random() - 0.5)
 
@@ -146,31 +195,61 @@ class JevPilot2Simulator:
                 "type": self.roadside_obstacle["type"],
             }
 
-        # Standard candidate vectors across all strategies
-        # [speed, steer, route_error, offroad_fraction, collision_predicted, stop_at_line]
-        candidates = {
-            "v0": [round(min(self.speed_mps + 2.5, 30.0), 1), 0.0, round(self.x, 2), 0.0, False, False],
-            "v1": [round(self.speed_mps, 1), 0.0, round(self.x, 2), 0.0, False, False],
-            "v2": [round(max(0.0, self.speed_mps - 4.0), 1), 0.0, round(self.x, 2), 0.0, False, dist_to_line is not None and dist_to_line < 25.0],
-            "v3": [round(max(0.0, self.speed_mps - 1.0), 1), -0.20, round(self.x - 0.8, 2), 0.0, False, False],  # Nudge left (dodge right hazard)
-            "v4": [round(max(0.0, self.speed_mps - 1.0), 1), 0.20, round(self.x + 0.8, 2), 0.0, False, False],   # Nudge right
-            "v5": [0.0, 0.0, round(self.x, 2), 0.0, False, dist_to_line is not None and dist_to_line < 15.0],    # Full stop at line
-        }
+        construction_obs = None
+        if self.construction:
+            c_dist = max(0.0, self.construction["z"] - self.z)
+            construction_obs = {
+                "distance_m": round(c_dist, 1),
+                "lateral_offset_m": round(self.construction["x"], 1),
+                "sign": self.construction["sign"],
+                "lane": "ego",
+            }
 
-        # Flag collision predictions for forward hazards
-        if self.pedestrian and 0.0 < (self.pedestrian["z"] - self.z) < 25.0 and abs(self.pedestrian["x"]) < 1.6:
-            candidates["v0"][4] = True
-            candidates["v1"][4] = True
+        other_obs = None
+        if self.other_vehicle:
+            other_obs = {
+                "distance_m": round(self.other_vehicle["z"] - self.z, 1),
+                "lateral_offset_m": round(self.other_vehicle["x"] - self.x, 1),
+                "speed_mps": round(self.other_vehicle["speed_mps"], 1),
+                "arriving": True,
+            }
 
-        if self.roadside_obstacle and 0.0 < (self.roadside_obstacle["z"] - self.z) < 30.0:
-            if candidates["v0"][1] >= 0.0:
-                candidates["v0"][4] = True
-            if candidates["v1"][1] >= 0.0:
-                candidates["v1"][4] = True
+        emergency_obs = None
+        if self.emergency_vehicle:
+            emergency_obs = {
+                "distance_m": round(abs(self.z - self.emergency_vehicle["z"]), 1),
+                "behind": self.emergency_vehicle["z"] < self.z,
+                "speed_mps": round(self.emergency_vehicle["speed_mps"], 1),
+                "siren": True,
+            }
 
-        if self.cut_in_vehicle and 0.0 < (self.cut_in_vehicle["z"] - self.z) < 20.0 and abs(self.cut_in_vehicle["x"]) < 1.2:
-            candidates["v0"][4] = True
-            candidates["v1"][4] = True
+        obstacles: List[Dict[str, Any]] = []
+        if self.pedestrian:
+            obstacles.append({"x": self.pedestrian["x"], "z": self.pedestrian["z"], "radius": 2.8})
+        if self.roadside_obstacle:
+            obstacles.append({"x": self.roadside_obstacle["x"], "z": self.roadside_obstacle["z"], "radius": 3.2})
+        if self.cut_in_vehicle:
+            obstacles.append({"x": self.cut_in_vehicle["x"], "z": self.cut_in_vehicle["z"], "radius": 3.0})
+        if self.construction:
+            obstacles.append({"x": self.construction["x"], "z": self.construction["z"], "radius": 2.8})
+        if self.other_vehicle:
+            obstacles.append({"x": self.other_vehicle["x"], "z": self.other_vehicle["z"], "radius": 2.8})
+
+        stop_line_z = None
+        if self.intersection:
+            stop_line_z = float(self.intersection["stop_line_ahead_m"])
+
+        samples = sample_trajectories(
+            ego_x=self.x,
+            ego_z=self.z,
+            speed=self.speed_mps if math.isfinite(self.speed_mps) else 0.0,
+            curvature=self.track_curvature,
+            stop_line_z=stop_line_z,
+            obstacles=obstacles,
+            seed=self.seed + int(self.t * 20),
+        )
+        candidates = candidates_as_vecs(samples)
+        candidate_meta = candidates_meta(samples)
 
         obs = {
             "speed_mps": round(self.speed_mps, 2),
@@ -187,7 +266,13 @@ class JevPilot2Simulator:
             } if self.intersection else None,
             "pedestrian": ped_obs,
             "roadside_obstacle": roadside_obs,
+            "construction": construction_obs,
+            "other_vehicle": other_obs,
+            "emergency_vehicle": emergency_obs,
+            "raw_mode": self.raw_mode,
+            "seed": self.seed,
             "candidates": candidates,
+            "candidate_meta": candidate_meta,
         }
 
         if self.has_anomaly and self.t > 1.0:
@@ -204,10 +289,6 @@ class JevPilot2Simulator:
 
         target_speed = chosen_vector[0] if len(chosen_vector) > 0 else self.speed_mps
         target_steer = chosen_vector[1] if len(chosen_vector) > 1 else 0.0
-
-        if is_ood:
-            target_speed = 0.0
-            target_steer = 0.0
 
         # Dynamics
         accel = (target_speed - self.speed_mps) * 4.0
@@ -234,6 +315,13 @@ class JevPilot2Simulator:
         if self.cut_in_vehicle and self.t >= self.cut_in_vehicle["cut_in_time"]:
             self.cut_in_vehicle["x"] = max(0.0, self.cut_in_vehicle["x"] - 1.5 * self.dt)
             self.cut_in_vehicle["z"] += self.cut_in_vehicle["speed_mps"] * self.dt
+
+        if self.other_vehicle and self.other_vehicle["arriving"]:
+            self.other_vehicle["z"] += self.other_vehicle["speed_mps"] * self.dt * 0.35
+            self.other_vehicle["x"] = max(0.4, self.other_vehicle["x"] - 1.1 * self.dt)
+
+        if self.emergency_vehicle:
+            self.emergency_vehicle["z"] += self.emergency_vehicle["speed_mps"] * self.dt
 
         # Safety & Boundary Checks
         if abs(self.x) > 4.5:
@@ -272,16 +360,46 @@ class JevPilot2Simulator:
                 self.collision = True
                 self.vehicle_collision = True
 
+        if self.construction:
+            dist_k = self.construction["z"] - self.z
+            if 0.0 <= dist_k < 3.2 and abs(self.x - self.construction["x"]) < 1.35:
+                self.collision = True
+                self.vehicle_collision = True
+                self.detour_violation = True
+
+        if self.other_vehicle:
+            dist_o = self.other_vehicle["z"] - self.z
+            if 0.0 <= dist_o < 3.2 and abs(self.other_vehicle["x"] - self.x) < 1.7:
+                self.collision = True
+                self.vehicle_collision = True
+                self.priority_violation = True
+
+        if self.emergency_vehicle:
+            catching = self.emergency_vehicle["z"] - self.z
+            if abs(self.x) < 0.55 and -4.0 < catching < 6.0 and self.t > 1.4:
+                self.emergency_violation = True
+                self.collision = True
+                self.vehicle_collision = True
+
         terminated = False
-        if self.collision or self.off_track or self.red_light_violation:
-            terminated = True
-        elif self.scenario_type == "sensor_anomaly" and self.fail_safe_triggered and self.speed_mps < 0.5:
+        if self.scenario_type == "sensor_anomaly" and self.fail_safe_triggered and self.speed_mps < 0.5:
             self.completed = True
+            terminated = True
+        elif self.collision or self.off_track or self.red_light_violation:
             terminated = True
         elif self.scenario_type == "traffic_light_red" and self.intersection and (self.intersection["stop_line_ahead_m"] - self.z) <= 5.0 and self.speed_mps < 1.0:
             self.completed = True
             terminated = True
         elif self.scenario_type == "pedestrian_jaywalking" and self.pedestrian and (self.pedestrian["z"] - self.z) <= 5.0 and self.speed_mps < 1.0:
+            self.completed = True
+            terminated = True
+        elif self.scenario_type == "ambiguous_priority" and self.other_vehicle and (self.other_vehicle["z"] - self.z) <= 6.0 and self.speed_mps < 1.2:
+            self.completed = True
+            terminated = True
+        elif self.scenario_type == "construction_detour" and self.construction and (self.construction["z"] - self.z) < -4.0 and abs(self.x) >= 0.55:
+            self.completed = True
+            terminated = True
+        elif self.scenario_type == "emergency_vehicle" and abs(self.x) >= 0.7 and self.t >= 2.0:
             self.completed = True
             terminated = True
         elif self.z >= 250.0 or self.t >= 15.0:
@@ -291,8 +409,14 @@ class JevPilot2Simulator:
         return terminated, self.get_observation()
 
 
-def run_jevpilot2_episode(engine: DecisionEngine, mode: str, scenario: str, seed: int) -> Dict[str, Any]:
-    env = JevPilot2Simulator(scenario, seed=seed)
+def run_jevpilot2_episode(
+    engine: DecisionEngine,
+    mode: str,
+    scenario: str,
+    seed: int,
+    raw_mode: bool = False,
+) -> Dict[str, Any]:
+    env = JevPilot2Simulator(scenario, seed=seed, raw_mode=raw_mode)
     latencies = []
     step_count = 0
     decision_interval = 2
@@ -306,6 +430,7 @@ def run_jevpilot2_episode(engine: DecisionEngine, mode: str, scenario: str, seed
             req = {
                 "model": engine.model_name,
                 "mode": mode,
+                "raw_mode": raw_mode,
                 "state": obs,
                 "questions": {
                     "motion": {
@@ -328,8 +453,8 @@ def run_jevpilot2_episode(engine: DecisionEngine, mode: str, scenario: str, seed
 
             answers = resp.get("answers", {})
             chosen_id = answers.get("vector", {}).get("choice", "v1")
-            chosen_vec = obs["candidates"].get(chosen_id, [env.speed_mps, 0.0])
-            is_ood = resp.get("meta", {}).get("tier1_maneuver") == "HAZARD_AVOID" and "anomaly" in obs
+            chosen_vec = list(obs["candidates"].get(chosen_id, [env.speed_mps, 0.0]))
+            is_ood = bool(resp.get("meta", {}).get("true_ood"))
 
         terminated, _ = env.step(chosen_vec, is_ood)
         step_count += 1
@@ -355,27 +480,45 @@ def run_jevpilot2_episode(engine: DecisionEngine, mode: str, scenario: str, seed
         "steering_oscillation": round(steering_oscillation, 2),
         "avg_speed_mps": round(avg_speed, 2),
         "fail_safe_triggered": env.fail_safe_triggered,
+        "true_ood": env.has_anomaly,
+        "priority_violation": env.priority_violation,
+        "detour_violation": env.detour_violation,
+        "emergency_violation": env.emergency_violation,
+        "seed": seed,
+        "raw_mode": raw_mode,
         "latencies": latencies,
     }
 
 
-def evaluate_jevpilot2_mode(engine: DecisionEngine, mode: str, episodes_per_sc: int = 10) -> Dict[str, Any]:
-    scenarios = [
-        "traffic_light_red",
-        "speed_zone_city",
-        "pedestrian_jaywalking",
-        "roadside_parked_hazard",
-        "cut_in_vehicle",
-        "sharp_curve",
-        "sensor_anomaly",
-    ]
+CORE_SCENARIOS = [
+    "traffic_light_red",
+    "speed_zone_city",
+    "pedestrian_jaywalking",
+    "roadside_parked_hazard",
+    "cut_in_vehicle",
+    "sharp_curve",
+    "sensor_anomaly",
+]
+
+ALL_SCENARIOS = CORE_SCENARIOS + list(SEMANTIC_EXCLUSIVE_SCENARIOS[:-1])  # sensor_anomaly already in core
+
+
+def evaluate_jevpilot2_mode(
+    engine: DecisionEngine,
+    mode: str,
+    episodes_per_sc: int = 10,
+    base_seed: int = 42,
+    raw_mode: bool = False,
+    scenarios: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    scenarios = list(scenarios or ALL_SCENARIOS)
     results = []
     all_latencies = []
 
     for sc in scenarios:
         for ep in range(episodes_per_sc):
-            seed = ep * 200 + hash(sc) % 10000
-            res = run_jevpilot2_episode(engine, mode, sc, seed)
+            seed = scenario_seed(base_seed, sc, ep)
+            res = run_jevpilot2_episode(engine, mode, sc, seed, raw_mode=raw_mode)
             results.append(res)
             all_latencies.extend(res["latencies"])
 
@@ -389,6 +532,20 @@ def evaluate_jevpilot2_mode(engine: DecisionEngine, mode: str, episodes_per_sc: 
     speeding = sum(1 for r in results if r["speeding_violation"])
     avg_jerk = sum(r["jerk_rms"] for r in results) / total
     avg_speed = sum(r["avg_speed_mps"] for r in results) / total
+
+    scenario_breakdown: Dict[str, Dict[str, Any]] = {}
+    for sc in scenarios:
+        chunk = [r for r in results if r["scenario"] == sc]
+        n = max(1, len(chunk))
+        scenario_breakdown[sc] = {
+            "episodes": len(chunk),
+            "completed": sum(1 for r in chunk if r["completed"]),
+            "collisions": sum(1 for r in chunk if r["collision"]),
+            "red_light_violations": sum(1 for r in chunk if r["red_light_violation"]),
+            "pedestrian_casualties": sum(1 for r in chunk if r["pedestrian_casualty"]),
+            "vehicle_collisions": sum(1 for r in chunk if r["vehicle_collision"]),
+            "fail_safe": sum(1 for r in chunk if r["fail_safe_triggered"]),
+        }
 
     all_latencies.sort()
     p50 = all_latencies[len(all_latencies) // 2] if all_latencies else 0.0
@@ -411,6 +568,12 @@ def evaluate_jevpilot2_mode(engine: DecisionEngine, mode: str, episodes_per_sc: 
         "avg_speed_mps": round(avg_speed, 2),
         "latency_p50_ms": round(p50, 2),
         "latency_p99_ms": round(p99, 2),
+        "driving_quality": driving_quality(results),
+        "deprecated_sdi": semantic_driving_index(results),
+        "base_seed": base_seed,
+        "raw_mode": raw_mode,
+        "scenario_breakdown": scenario_breakdown,
+        "episodes": results,
     }
 
 
@@ -420,6 +583,13 @@ def main():
     parser.add_argument("--device", default=None, help="Compute device")
     parser.add_argument("--mock", action="store_true", help="Run with mock engine")
     parser.add_argument("--episodes", type=int, default=10, help="Episodes per scenario")
+    parser.add_argument("--seed", type=int, default=42, help="Base simulation seed (default 42)")
+    parser.add_argument(
+        "--seeds",
+        default="42,123,2026",
+        help="Comma-separated seed matrix. Empty string uses only --seed.",
+    )
+    parser.add_argument("--raw-mode", action="store_true", help="Disable stop-at-line candidate injection")
     parser.add_argument("--output", default="results/phase5-jevpilot-2.0-hierarchical-benchmark.json", help="Output path")
     args = parser.parse_args()
 
@@ -430,16 +600,12 @@ def main():
         enable_graph=True,
     )
 
-    modes = ["heuristic", "flat", "semif_hierarchical"]
-    scenarios = [
-        "traffic_light_red",
-        "speed_zone_city",
-        "pedestrian_jaywalking",
-        "roadside_parked_hazard",
-        "cut_in_vehicle",
-        "sharp_curve",
-        "sensor_anomaly",
-    ]
+    modes = ["heuristic", "flat"]
+    scenarios = list(ALL_SCENARIOS)
+    seed_text = (args.seeds or "").strip()
+    seeds = [int(s) for s in seed_text.split(",") if s.strip()] if seed_text else [args.seed]
+    if args.seed not in seeds:
+        seeds = [args.seed] + seeds
 
     report: Dict[str, Any] = {
         "benchmark": "JevPilot 2.0 Hierarchical Closed-Loop Driving Benchmark",
@@ -447,19 +613,56 @@ def main():
         "model": args.model if not args.mock else "MockDecisionEngine",
         "device": engine.device,
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "seeds": seeds,
+        "raw_mode": args.raw_mode,
         "modes": {},
+        "quality_by_seed": {},
     }
+
+    mode_episodes: Dict[str, List[Dict[str, Any]]] = {mode: [] for mode in modes}
 
     for mode in modes:
         logger.info(f"Evaluating strategy: {mode.upper()}...")
-        summary = evaluate_jevpilot2_mode(engine, mode, episodes_per_sc=args.episodes)
-        report["modes"][mode] = summary
-        logger.info(
-            f"[{mode.upper()}] Success: {summary['task_completion_rate']*100:.1f}%, "
-            f"RedLights: {summary['red_light_violations']}, PedCasualties: {summary['pedestrian_casualties']}, "
-            f"VehCollisions: {summary['vehicle_collisions']}, Speeding: {summary['speeding_violations']}, "
-            f"Jerk: {summary['jerk_rms']} m/s^3"
+        summary = evaluate_jevpilot2_mode(
+            engine,
+            mode,
+            episodes_per_sc=args.episodes,
+            base_seed=seeds[0],
+            raw_mode=args.raw_mode,
+            scenarios=scenarios,
         )
+        compact = {k: v for k, v in summary.items() if k != "episodes"}
+        report["modes"][mode] = compact
+        mode_episodes[mode].extend(summary["episodes"])
+        quality = summary["driving_quality"]
+        logger.info(
+            f"[{mode.upper()}] Clean: {quality['clean_completion_rate']*100:.1f}%, "
+            f"Incidents: {quality['incident_rate']*100:.1f}%, "
+            f"RedLights: {summary['red_light_violations']}, "
+            f"PedCasualties: {summary['pedestrian_casualties']}, "
+            f"VehCollisions: {summary['vehicle_collisions']}, Speeding: {summary['speeding_violations']}, "
+            f"OOD-FP: {quality['ood_false_positive_rate']:.2f}"
+        )
+
+    if len(seeds) > 1:
+        for seed in seeds[1:]:
+            seed_eps: Dict[str, List[Dict[str, Any]]] = {}
+            for mode in modes:
+                extra = evaluate_jevpilot2_mode(
+                    engine,
+                    mode,
+                    episodes_per_sc=max(1, args.episodes // 2),
+                    base_seed=seed,
+                    raw_mode=args.raw_mode,
+                    scenarios=scenarios,
+                )
+                seed_eps[mode] = extra["episodes"]
+                mode_episodes[mode].extend(extra["episodes"])
+            report["quality_by_seed"][str(seed)] = {
+                mode: driving_quality(eps) for mode, eps in seed_eps.items()
+            }
+
+    report["driving_quality"] = compare_driving(mode_episodes)
 
     out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)

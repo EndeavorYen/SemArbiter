@@ -22,7 +22,17 @@
       @keyframes loading-spin{to{transform:rotate(360deg)}}
       @media (prefers-reduced-motion:reduce){.loading-spinner{animation:none}}
     </style>
+    <script>
+      (function () {
+        var q = new URLSearchParams(location.search);
+        window.SEMIF_RAW_MODE = q.get("raw") === "1" || q.get("rawMode") === "1";
+        var seed = q.get("seed");
+        window.SEMIF_SEED = seed && isFinite(Number(seed)) ? Number(seed) : null;
+      })();
+    </script>
+    <link rel="stylesheet" href="/jevpilot/semif-layer.css" />
     <script type="module" crossorigin src="/jevpilot/assets/index-DC8fTtby.js"></script>
+    <script src="/jevpilot/semif-layer.js" defer></script>
   </head>
   <body class="loading">
     <div id="scene-loader" role="status" aria-live="polite">

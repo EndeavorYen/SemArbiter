@@ -15,6 +15,13 @@ pytest -q
 
 Use one GPU per scorer process. The measured environment was Ubuntu 22.04 on Linux x86_64, Python 3.10.12, NVIDIA driver 595.71.05, CUDA 12.8, PyTorch 2.10.0+cu128, Transformers 5.17.0, BF16, and an RTX 3090. `requirements.txt` pins the observed Python runtime packages; the CUDA-enabled PyTorch wheel still requires a compatible NVIDIA driver. Exact model commit IDs are in [../manifests/models.json](../manifests/models.json).
 
+JevPilot closed-loop episodes use `random.Random(seed)` and `benchmarks.sdi.scenario_seed`. The 3D client honors `?seed=` (world + traffic) and `?raw=1` (no stop-at-line injection). Standard comparison seeds are 42, 123, and 2026:
+
+```bash
+python benchmarks/benchmark_jevpilot_hierarchical.py --mock --episodes 2 --seeds 42,123,2026 --raw-mode \
+  --output /tmp/jevpilot-sdi-mock.json
+```
+
 `pytest -q` runs all core and browser-source tests. Timing is hardware-sensitive, and BF16/kernel differences can change borderline probabilities or choices. Treat committed row counts, schemas, source hashes, and checksums as exact acceptance criteria; treat timings and model outputs as measurements to compare with the committed row-level evidence, not byte-identical golden outputs.
 
 ## Score owned examples
