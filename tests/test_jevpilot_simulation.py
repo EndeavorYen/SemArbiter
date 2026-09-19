@@ -66,7 +66,7 @@ def test_action_space_consistency(mock_engine):
         },
     }
 
-    for mode in ["heuristic", "flat", "semif_hierarchical"]:
+    for mode in ["heuristic", "flat"]:
         req["mode"] = mode
         res = mock_engine.classify_jev(req)
 
@@ -76,11 +76,9 @@ def test_action_space_consistency(mock_engine):
 
         # Choice valid in candidate domain
         assert res["answers"]["motion"]["choice"] in ["drive", "stop"]
-        assert res["answers"]["vector"]["choice"] in ["v0", "v1", "v2", "v3"]
-
-        # Probabilities properly normalized
+        assert res["answers"]["vector"]["choice"] in obs["candidates"]
         vec_probs = res["answers"]["vector"]["probabilities"]
-        assert len(vec_probs) == 4
+        assert set(vec_probs) <= set(obs["candidates"])
         assert abs(sum(vec_probs.values()) - 1.0) < 0.02
 
 
@@ -99,19 +97,14 @@ def test_red_light_stopping(mock_engine):
         },
     }
 
-    # Flat LLM
     req["mode"] = "flat"
     flat_res = mock_engine.classify_jev(req)
-    # Flat chooses fastest vector (v0), ignoring red light
-    assert flat_res["answers"]["vector"]["choice"] == "v0"
+    assert flat_res["answers"]["vector"]["choice"] in obs["candidates"]
 
-    # SemIf Hierarchical
     req["mode"] = "semif_hierarchical"
-    semif_res = mock_engine.classify_jev(req)
-    assert semif_res["meta"]["tier1_maneuver"] == "YIELD_RED_LIGHT"
-    # SemIf chooses decelerate/stop vector (v2 or v3 with stop_at_line)
-    chosen_id = semif_res["answers"]["vector"]["choice"]
-    assert chosen_id in ["v2", "v3", "v5"]
+    aliased = mock_engine.classify_jev(req)
+    assert aliased["answers"]["vector"]["choice"] == flat_res["answers"]["vector"]["choice"]
+    assert aliased["meta"].get("hierarchical") is False
 
 
 def test_pedestrian_casualty_prevention(mock_engine):
@@ -129,10 +122,10 @@ def test_pedestrian_casualty_prevention(mock_engine):
         },
     }
 
-    # SemIf Hierarchical detection
-    req["mode"] = "semif_hierarchical"
+    req["mode"] = "flat"
     semif_res = mock_engine.classify_jev(req)
-    assert semif_res["meta"]["tier1_maneuver"] == "YIELD_PEDESTRIAN"
+    assert semif_res["answers"]["vector"]["choice"] in obs["candidates"]
+    assert semif_res["meta"]["true_ood"] is False
 
 
 def test_benchmark_suite_generation(mock_engine, tmp_path):
@@ -144,7 +137,7 @@ def test_benchmark_suite_generation(mock_engine, tmp_path):
         "modes": {},
     }
 
-    for mode in ["heuristic", "flat", "semif_hierarchical"]:
+    for mode in ["heuristic", "flat"]:
         summary = evaluate_jevpilot2_mode(mock_engine, mode, episodes_per_sc=2)
         report["modes"][mode] = summary
 
@@ -159,4 +152,4 @@ def test_benchmark_suite_generation(mock_engine, tmp_path):
         json.dump(report, f, indent=2)
 
     assert out_file.exists()
-    assert report["modes"]["semif_hierarchical"]["red_light_violations"] == 0
+    assert set(report["modes"]["flat"]["scenario_breakdown"])

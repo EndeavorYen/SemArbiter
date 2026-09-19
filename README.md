@@ -18,7 +18,7 @@
 
 *Independent research project; not affiliated with Jev or TypeSafe.*
 
-**[🏎️ Launch JevPilot 3D Simulator](http://localhost:8000/jevpilot/)** · **[🚀 Run WebGPU Browser Demo](webgpu-demo/index.html)** · **[📖 8-Part Technical Tutorials](docs/tutorials/README.md)** · **[📊 Benchmark Results](docs/RESULTS.md)**
+**[🏎️ Launch JevPilot 3D Simulator](http://localhost:8000/jevpilot/)** · **[🚀 Run WebGPU Browser Demo](webgpu-demo/index.html)** · **[📖 Technical Tutorials](docs/tutorials/README.md)** · **[📊 Benchmark Results](docs/RESULTS.md)**
 
 </div>
 
