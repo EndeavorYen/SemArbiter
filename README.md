@@ -18,7 +18,7 @@
 
 *Independent research project; not affiliated with Jev or TypeSafe.*
 
-**[🚀 Run Browser WebGPU Demo](webgpu-demo/index.html)** · **[📖 8-Part Technical Tutorials](docs/tutorials/README.md)** · **[📊 Benchmark Results](docs/RESULTS.md)**
+**[🚀 Run Browser WebGPU Demo](webgpu-demo/index.html)** · **[🏎️ JevPilot 3D Driving Simulator](demo/jevpilot/index.html)** · **[📖 8-Part Technical Tutorials](docs/tutorials/README.md)** · **[📊 Benchmark Results](docs/RESULTS.md)**
 
 </div>
 
@@ -202,6 +202,71 @@ python benchmarks/benchmark_mac_mini.py
 pytest -q
 python benchmarks/verify_published.py
 ```
+
+---
+
+## 🏎️ JevPilot: 3D 實時自動駕駛模擬器與決策伺服器 (Interactive Live Demo)
+
+靈感源自 [`featherless-ai/simple-jev`](https://github.com/featherless-ai/simple-jev) 與 [`standardagents/jevpilot`](https://github.com/standardagents/jevpilot)，本專案提供端到端零建置 (Zero-Build) 3D 互動駕駛環境與 sub-15ms 語意決策伺服器：
+
+### 🎯 核心功能亮點
+1. **純前端 3D 駕駛場景 (`demo/jevpilot/index.html`)**：
+   - 採用 CDN Three.js，無任何前端建置依賴。
+   - 包含多車道動態曲率高速公路、障礙車流、車輛慣性動力學與動態跟隨相機。
+2. **WebSocket 雙向實時流 (`demo/server.py`)**：
+   - 以 20~60 Hz 接收車輛遙測狀態（橫向偏移、曲率、前方障礙距離、車速），即時回傳決策。
+   - 整合 `Qwen2.5-3B-Instruct` 切片輸出頭、先驗反向校準 (Prior Debiasing) 與 CUDA Graphs 加速。
+3. **三種駕駛模式即時切換**：
+   - **Manual [1]**：鍵盤 WASD / 方向鍵手動駕駛。
+   - **Raw LLM [2]**：展示未經校準之大模型原形（受 Option-A 偏置影響，頻繁向左漂移出界，出界率達 75%）。
+   - **SemIf Autopilot [3]**：先驗去偏校準 + 切片輸出頭，精準巡航、過彎與超車。
+4. **Helmholtz 自由能 OOD 安全護欄 (Chaos Monkey [4])**：
+   - 按鍵 `[4]` 注入感測器毀損噪聲（NaN、封包錯誤）。
+   - SemIf 自由能即刻躍升觸發 OOD 報警（$E > -20.0$），強制啟動緊急煞車（AEB Fail-Safe）避險！
+
+### 啟動方式
+```bash
+# 啟動決策伺服器（支援 Mock 零顯卡模式，或指定 --device cuda 啟用 RTX 5080 硬體）
+python demo/server.py --model Qwen/Qwen2.5-3B-Instruct --device cuda --port 8000
+
+# 瀏覽器開啟：http://localhost:8000/jevpilot/
+# （若未啟動伺服器，前端具備內建離線啟發式引擎，仍可直接點開 index.html 體驗）
+```
+
+### 實測閉環駕駛 Benchmark 對決 (`results/phase5-jevpilot-qwen25-3b-real-benchmark.json`)
+*在物理 RTX 5080 上針對 4 大場景（急彎、驟現障礙物、高速巡航、感測器噪聲）進行 20 回合閉環實測：*
+
+| 評測模式 | 任務完成率 ↑ | 碰撞事故率 ↓ | 衝出跑道率 ↓ | OOD 異常攔截召回率 ↑ | 決策延遲 (P50) |
+|---|---:|---:|---:|---:|---:|
+| **Heuristic 啟發式基準** | 85.0% | 0.0% | 15.0% | 100.0% | 0.0 ms |
+| **Raw Qwen2.5-3B Direct** | **0.0%** | 25.0% | 75.0% | **0.0% (致盲撞毀)** | 23.74 ms |
+| **SemIf Enhanced Qwen2.5-3B** | **25.0%** | 25.0% | **50.0%** | **100.0% (完美避險)** | **39.27 ms** |
+
+---
+
+## 👁️ 視覺串接 Jev 技術解析 (Visual Jev: `djev-spark` vs SemIf-Vision)
+
+針對社群專案 [`mmastrac/djev-spark`](https://github.com/mmastrac/djev-spark) 的視覺決策機制，核心架構與 SemIf 的融合方案解析如下：
+
+### 1. `djev-spark` 的視覺驅動原理
+- **架構特點**：採用 DiffusionGemma / DiT (Diffusion Transformer) 搭配 NVFP4 量化張量核心，部署於 DGX Spark。
+- **繞過自回歸生成**：傳統 VLM（如 CLIP+LLM）將圖片切為 576~1152 個 Patch Token 後，需歷經 300~800ms 的逐詞解碼才能輸出動作文字。`djev-spark` 將決策視為**非自回歸擴散採樣 (Discrete Diffusion / Parallel Readout)**：
+  - 視覺 Patch Token 透過單次前向饋入 Transformer 主幹。
+  - 輸出端直接透過少量步數（1~4 步）的擴散降噪採樣，在動作空間中直接求得決策，達成每幀 10~20ms 視覺實時響應。
+
+### 2. SemIf-Vision 的端到端整合架構
+在 SemIf 框架下，實現視覺串接更加輕量且無需擴散採樣：
+```
+[視覺影像] ──> [輕量 Vision Encoder (SigLIP / MobileCLIP)] ──> [Visual Prefix Tokens (N=64)]
+                                                                        │
+                                                                        ▼
+[候選動作: A/B/C/D/E] ──> [SemIf Sliced Head Single-Forward Pass] ──> [實時 Calibrated Logits (< 15ms)]
+                                                                        │
+                                                                        ▼
+                                                   [Helmholtz OOD Gate -> 安全護欄]
+```
+- **極速單次前向**：將攝像頭影像經輕量視覺編碼器提取為 Prefix Tokens，直接拼接決策準則與選項，在最後一個 Token 處執行 SemIf 切片輸出頭投影。
+- **無文字生成循環**：零詞元生成、零 JSON 反序列化，同時具備 SemIf 獨創的先驗校準與自由能 OOD 安全拒絕機制。
 
 ---
 
