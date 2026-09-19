@@ -227,3 +227,13 @@ python benchmarks/benchmark_jevpilot_hierarchical.py \
 ```
 
 > **注意**：依據評測誠實性規範，正式成果報告內必須明確標記 `device: cuda`，且不得包含 `MockDecisionEngine`。
+
+---
+
+## 七、網頁與閉環怎麼對齊
+
+見 [#83](https://github.com/EndeavorYen/SemIf/issues/83)。
+
+- **契約聽測試**：號誌不進採樣器；六欄向量；`VECTOR_INSTRUCTIONS`（`Choose a safe driving path.`）不含 stop coaching；仲裁器同一份 `classify_jev`。
+- **採樣品質聽 3D planner**：路網與車體以網頁為準，不要把 Demo 改成 Python 粗網格。
+- **分數聽 Python 閉環**：3D 世界不同，GPU 乾淨完成率不是網頁成績。

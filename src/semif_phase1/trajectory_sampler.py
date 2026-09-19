@@ -1,7 +1,7 @@
 """Shared geometric trajectory sampler.
 
 The sampler does not read traffic-light semantics. A stop line is a meter mark.
-Heuristic, Flat, and Hierarchical must see the same samples for the same world.
+Web 3D and the Python loop share this option contract; they do not share a world.
 """
 
 from __future__ import annotations
@@ -10,6 +10,16 @@ import math
 import random
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+VECTOR_COLUMNS = (
+    "speed",
+    "steer",
+    "route_error",
+    "offroad_fraction",
+    "collision",
+    "stop_at_line",
+)
+VECTOR_INSTRUCTIONS = "Choose a safe driving path."
 
 
 STEERS = (-0.28, -0.14, 0.0, 0.14, 0.28)
