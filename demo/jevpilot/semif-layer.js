@@ -31,6 +31,7 @@
       <div id="fsd-probs"></div>
     </aside>
     <div id="fsd-seed"></div>
+    <div id="fsd-vision" aria-label="Vision">VISION off</div>
   `;
   document.body.appendChild(chrome);
 
@@ -40,6 +41,9 @@
   const drawer = document.getElementById("fsd-drawer");
   const rawBtn = document.getElementById("fsd-raw-toggle");
   const seedEl = document.getElementById("fsd-seed");
+  const visionEl = document.getElementById("fsd-vision");
+  const visionOn = params.get("vision") !== "0";
+  window.SEMIF_VISION = null;
   const intentEl = document.getElementById("fsd-intent");
   const directiveEl = document.getElementById("fsd-directive");
   const probsEl = document.getElementById("fsd-probs");
@@ -77,6 +81,10 @@
           body.state = body.state || {};
           body.state.seed = window.SEMIF_SIM.world.seed;
           body.state.raw_mode = !!window.SEMIF_RAW_MODE;
+        }
+        if (window.SEMIF_VISION) {
+          body.state = body.state || {};
+          body.state.vision = window.SEMIF_VISION;
         }
         opts = Object.assign({}, opts, { body: JSON.stringify(body) });
       } catch (_err) {
@@ -305,4 +313,54 @@
   }
 
   requestAnimationFrame(tick);
+
+  function grabFrame() {
+    const world = window.SEMIF_WORLD;
+    const canvas = (world && world.canvas) || document.getElementById("world-canvas");
+    if (!canvas || !canvas.toDataURL) return null;
+    const tmp = document.createElement("canvas");
+    const w = 320;
+    const h = Math.max(64, Math.round((canvas.height / Math.max(canvas.width, 1)) * w));
+    tmp.width = w;
+    tmp.height = h;
+    tmp.getContext("2d").drawImage(canvas, 0, 0, w, h);
+    return tmp.toDataURL("image/jpeg", 0.55);
+  }
+
+  async function visionTick() {
+    if (!visionOn) {
+      visionEl.textContent = "VISION off";
+      return;
+    }
+    const dataUrl = grabFrame();
+    if (!dataUrl) {
+      visionEl.textContent = "VISION waiting";
+      return;
+    }
+    try {
+      const res = await origFetch("/v1/vision", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: dataUrl }),
+      });
+      const data = await res.json();
+      const vis = data.vision || data;
+      window.SEMIF_VISION = vis;
+      const sig = vis.signal || "unknown";
+      visionEl.textContent = [
+        "VISION",
+        vis.backend || "stub",
+        "sig " + sig,
+        "ped " + (vis.pedestrian != null ? Number(vis.pedestrian).toFixed(2) : "—"),
+        "veh " + (vis.vehicle != null ? Number(vis.vehicle).toFixed(2) : "—"),
+      ].join(" · ");
+    } catch (_err) {
+      visionEl.textContent = "VISION error";
+    }
+  }
+
+  if (visionOn) {
+    setInterval(visionTick, 700);
+    setTimeout(visionTick, 1500);
+  }
 })();

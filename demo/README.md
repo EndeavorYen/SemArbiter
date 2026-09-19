@@ -46,7 +46,8 @@ python demo/server.py --model Qwen/Qwen2.5-3B-Instruct --device cuda --port 8000
 # 2. Open in your browser
 # Navigate to: http://localhost:8000/jevpilot/
 # Replay a world: http://localhost:8000/jevpilot/?seed=42
-# Raw decision mode (no stop-at-line guard on candidates): ?raw=1
+# Vision HUD (canvas → /v1/vision → state.vision): default on; ?vision=0 to skip
+# Raw decision mode: ?raw=1
 # Or open demo/jevpilot/index.html directly (features automatic offline fallback engine)
 ```
 

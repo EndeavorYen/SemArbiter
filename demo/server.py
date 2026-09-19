@@ -751,6 +751,18 @@ class DecisionEngine:
             # Retired as a JevPilot executor. Same full-set scoring as flat.
             mode = "flat"
         raw_mode = bool(payload.get("raw_mode") or (isinstance(state, dict) and state.get("raw_mode")))
+        image = payload.get("image")
+        if not image and isinstance(state, dict):
+            image = state.get("image")
+        if isinstance(image, str) and len(image) > 64:
+            try:
+                from semif_phase1.vision import get_vision_encoder
+
+                vis = get_vision_encoder().infer_b64(image)
+                state = dict(state) if isinstance(state, dict) else {}
+                state["vision"] = vis
+            except Exception as exc:
+                logger.warning("vision encode skipped: %s", exc)
         answers: Dict[str, Any] = {}
         total_input_tokens = 0
 
@@ -955,6 +967,7 @@ async def health_check():
         "device": eng.device,
         "mock_mode": eng.use_mock,
         "cuda_graph_enabled": eng.graph_runner is not None,
+        "vision": True,
         "decisions_served": eng.stats["total_decisions"],
         "avg_latency_ms": round(avg_latency, 2),
         "min_latency_ms": round(eng.stats["min_latency_ms"], 2) if eng.stats["min_latency_ms"] != float("inf") else 0.0,
@@ -966,6 +979,17 @@ async def health_check():
 @app.post("/v1/systemone")
 async def classifier_endpoint(payload: Dict[str, Any]):
     return get_engine().classify_jev(payload)
+
+
+@app.post("/v1/vision")
+async def vision_endpoint(payload: Dict[str, Any]):
+    image = payload.get("image") or payload.get("image_base64")
+    if not isinstance(image, str) or len(image) < 64:
+        return {"error": "image (data URL or base64) required"}
+    from semif_phase1.vision import get_vision_encoder
+
+    evidence = get_vision_encoder().infer_b64(image)
+    return {"vision": evidence}
 
 
 @app.post("/decide")

@@ -34,6 +34,7 @@ PROMPT_STATE_KEYS = (
     "other_vehicle",
     "emergency_vehicle",
     "anomaly",
+    "vision",
 )
 
 
@@ -44,6 +45,7 @@ _SLIM_OBJECT_KEYS = {
     "construction": ("distance_m", "sign"),
     "other_vehicle": ("distance_m", "arriving"),
     "emergency_vehicle": ("distance_m", "behind", "siren"),
+    "vision": ("backend", "signal", "red", "green", "pedestrian", "vehicle", "construction"),
 }
 
 
