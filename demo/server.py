@@ -376,6 +376,10 @@ class DecisionEngine:
             strategic_intent = "NONE (Flat 1-of-N)"
             strategic_directive = "Naive unconstrained flat action selection."
             tier1 = {"intent": strategic_intent, "directive": strategic_directive}
+        elif mode == "heuristic":
+            strategic_intent = "GEOMETRIC_HEURISTIC"
+            strategic_directive = "Pure geometric road-boundary following (baseline)."
+            tier1 = {"intent": strategic_intent, "directive": strategic_directive}
         else:
             tier1 = self._determine_tier1_maneuver(state)
             strategic_intent = tier1["intent"]
@@ -398,6 +402,21 @@ class DecisionEngine:
             if not options:
                 continue
 
+            # Special case for motion (drive vs stop)
+            if q_key == "motion":
+                if mode == "semif_hierarchical" and strategic_intent == "YIELD_RED_LIGHT":
+                    inter = state.get("intersection", {}) if isinstance(state, dict) else {}
+                    dist = inter.get("distance_to_line_m", 100) if isinstance(inter, dict) else 100
+                    best_choice = "stop" if (dist is not None and dist < 2.5) else "drive"
+                else:
+                    best_choice = "drive" if any(o["id"] == "drive" for o in options) else options[0]["id"]
+                probs = {opt["id"]: 0.05 for opt in options}
+                probs[best_choice] = max(0.80, 1.0 - 0.05 * (len(options) - 1))
+                norm = sum(probs.values())
+                probs = {k: round(v / norm, 4) for k, v in probs.items()}
+                answers[q_key] = {"choice": best_choice, "probabilities": probs}
+                continue
+
             candidates = state.get("candidates", {}) if isinstance(state, dict) else {}
 
             if self.use_mock or self.model is None:
@@ -418,6 +437,9 @@ class DecisionEngine:
                         elif mode == "flat":
                             # Naive flat scoring: prioritizes speed, ignores red lights & speed limit
                             score_val = speed * 10.0 - r_err * 2.0
+                        elif mode == "heuristic":
+                            # Geometric lane tracking: balance route error and progress
+                            score_val = 10.0 + speed * 2.0 - r_err * 5.0
                         elif strategic_intent == "YIELD_RED_LIGHT":
                             # Heavily prioritize stopping at line with 0 velocity
                             score_val = 100.0 if stop_line else (-200.0 - speed * 10)
