@@ -265,22 +265,26 @@ class DecisionEngine:
         if is_ood and mode == "semif":
             final_action = "brake"
 
-        # Continuous control translation
-        if final_action == "steer_left":
-            steer = -0.75
-            throttle = 0.3
-        elif final_action == "steer_right":
-            steer = 0.75
-            throttle = 0.3
-        elif final_action == "brake":
+        # Continuous control translation using SemIf calibrated probabilities
+        p_left = prob_dict.get("steer_left", 0.0)
+        p_right = prob_dict.get("steer_right", 0.0)
+        p_accel = prob_dict.get("accelerate", 0.0)
+        p_brake = prob_dict.get("brake", 0.0)
+        p_maintain = prob_dict.get("maintain", 0.0)
+
+        if final_action == "brake":
             steer = 0.0
             throttle = -1.0
-        elif final_action == "accelerate":
+        elif is_ood:
             steer = 0.0
-            throttle = 0.8
-        else:  # maintain
-            steer = 0.0
-            throttle = 0.45
+            throttle = -1.0
+        else:
+            # Continuous smooth steering: net lateral force
+            steer = float(p_right - p_left) * 1.2
+            steer = max(-1.0, min(1.0, steer))
+            # Continuous smooth throttle
+            throttle = float(p_accel * 0.8 + p_maintain * 0.4 - p_brake * 1.0)
+            throttle = max(-1.0, min(1.0, throttle))
 
         # Update stats
         self.stats["total_decisions"] += 1

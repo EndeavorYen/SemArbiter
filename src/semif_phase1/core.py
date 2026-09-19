@@ -68,6 +68,33 @@ def softmax(values: list[float], temperature: float = 1.0) -> list[float]:
     return [weight / total for weight in weights]
 
 
+def expected_value(probabilities: list[float], option_values: list[float]) -> float:
+    """Compute expected value over continuous values associated with categorical options.
+
+    E[X] = sum_i (p_i * x_i)
+    Useful for continuous steering, probability-weighted regression, risk scoring,
+    and auction bid sizing without discrete argmax thrashing.
+    """
+    if len(probabilities) != len(option_values):
+        raise ValueError("Probabilities and option_values must have identical length")
+    return float(sum(p * v for p, v in zip(probabilities, option_values)))
+
+
+def sanitize_state(state: Any) -> Any:
+    """Recursively sanitize state data to replace NaN/Inf with string descriptors."""
+    if isinstance(state, float):
+        if math.isnan(state):
+            return "NaN"
+        if math.isinf(state):
+            return "Infinity" if state > 0 else "-Infinity"
+        return state
+    elif isinstance(state, dict):
+        return {k: sanitize_state(v) for k, v in state.items()}
+    elif isinstance(state, list):
+        return [sanitize_state(v) for v in state]
+    return state
+
+
 def apply_prior_calibration(logits: list[float], prior_logits: list[float]) -> list[float]:
     """Subtract unconditional context-free prior logits: z_calib = z_raw - z_null."""
     if len(logits) != len(prior_logits):
