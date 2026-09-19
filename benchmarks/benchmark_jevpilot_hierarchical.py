@@ -230,15 +230,15 @@ class JevPilot2Simulator:
 
         obstacles: List[Dict[str, Any]] = []
         if self.pedestrian:
-            obstacles.append({"x": self.pedestrian["x"], "z": self.pedestrian["z"], "radius": 2.8})
+            obstacles.append({"kind": "pedestrian", "x": self.pedestrian["x"], "z": self.pedestrian["z"]})
         if self.roadside_obstacle:
-            obstacles.append({"x": self.roadside_obstacle["x"], "z": self.roadside_obstacle["z"], "radius": 3.2})
+            obstacles.append({"kind": "roadside", "x": self.roadside_obstacle["x"], "z": self.roadside_obstacle["z"]})
         if self.cut_in_vehicle:
-            obstacles.append({"x": self.cut_in_vehicle["x"], "z": self.cut_in_vehicle["z"], "radius": 3.0})
+            obstacles.append({"kind": "vehicle", "x": self.cut_in_vehicle["x"], "z": self.cut_in_vehicle["z"]})
         if self.construction:
-            obstacles.append({"x": self.construction["x"], "z": self.construction["z"], "radius": 2.8})
+            obstacles.append({"kind": "vehicle", "x": self.construction["x"], "z": self.construction["z"]})
         if self.other_vehicle:
-            obstacles.append({"x": self.other_vehicle["x"], "z": self.other_vehicle["z"], "radius": 2.8})
+            obstacles.append({"kind": "vehicle", "x": self.other_vehicle["x"], "z": self.other_vehicle["z"]})
 
         stop_line_z = None
         if self.intersection:
@@ -252,6 +252,8 @@ class JevPilot2Simulator:
             stop_line_z=stop_line_z,
             obstacles=obstacles,
             seed=self.seed + int(self.t * 20),
+            speed_ceiling=self.speed_ceiling_mps,
+            current_steer=self.steer_angle,
         )
         candidates = candidates_as_vecs(samples)
         candidate_meta = candidates_meta(samples)

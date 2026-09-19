@@ -22,10 +22,16 @@ VECTOR_COLUMNS = (
 VECTOR_INSTRUCTIONS = "Choose a safe driving path."
 
 
-STEERS = (-0.28, -0.14, 0.0, 0.14, 0.28)
-SPEED_OFFSETS = (2.5, 0.0, -4.0)
-ROLLOUT_STEPS = 40
-DT = 0.05
+# Planner worker (demo/jevpilot/assets/planner.worker-*.js) policy, 1D track rewrite.
+# Steer is clamped to ±0.85. On-road it draws ~55 samples; we keep 16 for letter-slot.
+# Evaluation uses dt=0.05 and ~31 points (offroad_fraction uses p/31).
+STEER_LIMIT = 0.85
+PLAN_DT = 0.05
+PLAN_POINTS = 31
+MAX_SAMPLES = 16
+LANE_HALF_M = 4.5  # matches JevPilot2Simulator.off_track
+# Speed mix is a fraction of planning-max, matching the worker's A*(0.78..1.0) / A*(0.25..0.55).
+# Required-stop bias (O&&r<8) is NOT copied: that is signal injection.
 
 
 @dataclass
@@ -63,8 +69,29 @@ class Sample:
         }
 
 
-def _hits(px: float, pz: float, ox: float, oz: float, radius: float) -> bool:
-    return abs(pz - oz) < radius and abs(px - ox) < radius * 0.85
+def _hits_obstacle(x: float, z: float, obj: Dict[str, Any], speed: float) -> bool:
+    """Same radii as JevPilot2Simulator.step — prediction must match the loop."""
+    oz = obj.get("z")
+    ox = float(obj.get("x", 0.0) or 0.0)
+    if oz is None:
+        return False
+    kind = str(obj.get("kind") or obj.get("type") or "vehicle")
+    dz = float(oz) - z
+    dx = x - ox
+    if kind == "pedestrian":
+        return abs(dz) < 3.0 and abs(dx) < 1.6 and speed > 2.0
+    if kind == "roadside":
+        return abs(dz) < 3.5 and (x + 0.95) > (ox - 0.70)
+    if 0.0 <= dz < 3.5 and abs(dx) < 1.8:
+        return True
+    return False
+
+
+def planning_max(speed: float, speed_ceiling: Optional[float] = None) -> float:
+    cap = min(30.0, max(0.15, speed) + 2.5)
+    if speed_ceiling is not None and math.isfinite(float(speed_ceiling)):
+        cap = min(cap, float(speed_ceiling))
+    return max(0.0, cap)
 
 
 def rollout(
@@ -76,40 +103,60 @@ def rollout(
     curvature: float,
     stop_line_z: Optional[float],
     obstacles: Sequence[Dict[str, Any]],
+    current_steer: float = 0.0,
 ) -> Dict[str, Any]:
     x, z, v = ego_x, ego_z, speed
-    steer = 0.0
+    steer = current_steer
+    target_steer = max(-STEER_LIMIT, min(STEER_LIMIT, target_steer))
     offroad_steps = 0
     collision = False
-    for _ in range(ROLLOUT_STEPS):
+    crossed_line = False
+    for _ in range(PLAN_POINTS):
         accel = max(-12.0, min(6.0, (target_speed - v) * 4.0))
-        v = max(0.0, v + accel * DT)
-        steer += (target_steer - steer) * 6.0 * DT
-        z += v * DT
-        x += steer * v * DT * 2.0
-        x -= curvature * v * DT * 1.5
-        if abs(x) > 4.0:
+        v = max(0.0, v + accel * PLAN_DT)
+        steer += (target_steer - steer) * 6.0 * PLAN_DT
+        z += v * PLAN_DT
+        x += steer * v * PLAN_DT * 2.0
+        x -= curvature * v * PLAN_DT * 1.5
+        if abs(x) > LANE_HALF_M:
             offroad_steps += 1
+        if stop_line_z is not None and z >= stop_line_z:
+            crossed_line = True
         for obj in obstacles:
-            oz = obj.get("z")
-            ox = obj.get("x", 0.0)
-            if oz is None:
-                continue
-            rad = float(obj.get("radius", 2.4))
-            if 0.0 <= (oz - z) < rad + 1.5 and _hits(x, z, ox, oz, rad):
+            if _hits_obstacle(x, z, obj, v):
                 collision = True
     stop_at_line = False
     if stop_line_z is not None and (stop_line_z - ego_z) > 0.5:
-        stop_at_line = v < 0.8 and z < stop_line_z - 0.3
+        stop_at_line = v < 0.8 and z < stop_line_z - 0.3 and not crossed_line
     return {
         "end_speed": v,
         "end_x": x,
         "end_z": z,
-        "offroad": offroad_steps / ROLLOUT_STEPS,
+        "offroad": offroad_steps / PLAN_POINTS,
         "collision": collision,
         "stop_at_line": stop_at_line,
         "route_error": x,
+        "crosses_stop_line": crossed_line,
     }
+
+
+def _speed_fraction(index: int, rng: random.Random) -> float:
+    """Mirror worker mix without required-stop (O) or queue (R) branches."""
+    if index == 0:
+        return 0.0
+    if index <= 4:
+        return 0.25 + rng.random() * 0.30
+    if index % 5 == 0:
+        return 0.78 + rng.random() * 0.12
+    return 0.94 + rng.random() * 0.06
+
+
+def _steer_sample(index: int, rng: random.Random, current_steer: float) -> float:
+    """Worker: every 3rd sample is full-range; others hug current steer."""
+    if index % 3 == 0:
+        return (rng.random() * 2 - 1) * STEER_LIMIT
+    spread = max(0.015, STEER_LIMIT * 0.25)
+    return max(-STEER_LIMIT, min(STEER_LIMIT, current_steer + (rng.random() * 2 - 1) * spread))
 
 
 def sample_trajectories(
@@ -121,27 +168,34 @@ def sample_trajectories(
     stop_line_z: Optional[float] = None,
     obstacles: Optional[Sequence[Dict[str, Any]]] = None,
     seed: int = 0,
+    speed_ceiling: Optional[float] = None,
+    current_steer: float = 0.0,
 ) -> Dict[str, Sample]:
-    """Deterministic grid with a little seeded jitter. Signal color is not an input."""
+    """Planner-like mix on a 1D track. Signal color is not an input."""
     rng = random.Random(int(seed) ^ (int(ego_z * 10) << 3))
     obstacles = list(obstacles or [])
+    cap = planning_max(speed, speed_ceiling)
     samples: Dict[str, Sample] = {}
-    index = 0
-    combos: List[Tuple[float, float]] = []
-    for steer in STEERS:
-        for offset in SPEED_OFFSETS:
-            jitter_s = (rng.random() - 0.5) * 0.02
-            jitter_v = (rng.random() - 0.5) * 0.3
-            combos.append((steer + jitter_s, max(0.0, min(30.0, speed + offset + jitter_v))))
-    combos.append((0.0, 0.0))
-    for steer, target_speed in combos:
+    kept = 0
+    attempt = 0
+    while kept < MAX_SAMPLES and attempt < 40:
+        steer = _steer_sample(attempt, rng, current_steer)
+        target_speed = cap * _speed_fraction(attempt, rng)
         geom = rollout(
-            ego_x, ego_z, speed, target_speed, steer, curvature, stop_line_z, obstacles
+            ego_x,
+            ego_z,
+            speed,
+            target_speed,
+            steer,
+            curvature,
+            stop_line_z,
+            obstacles,
+            current_steer=current_steer,
         )
+        attempt += 1
         if geom["offroad"] > 0.55 and target_speed > 0.5:
             continue
-        sid = f"t{index:02d}"
-        index += 1
+        sid = f"t{kept:02d}"
         desc = (
             f"target {target_speed:.1f} m/s, steer {steer:+.2f}, "
             f"end_speed {geom['end_speed']:.1f} m/s, end_x {geom['end_x']:.1f} m, "
@@ -160,8 +214,7 @@ def sample_trajectories(
             end_z=geom["end_z"],
             description=desc,
         )
-        if index >= 16:
-            break
+        kept += 1
     if len(samples) < 2:
         samples["t00"] = Sample("t00", speed, 0.0, ego_x, 0.0, False, False, speed, ego_x, ego_z, "hold")
         samples["t01"] = Sample("t01", 0.0, 0.0, ego_x, 0.0, False, True, 0.0, ego_x, ego_z, "stop")
