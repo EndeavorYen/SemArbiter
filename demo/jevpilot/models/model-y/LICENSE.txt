@@ -1,0 +1,12 @@
+Model Information:
+* title:	Tesla Model Y 2021
+* source:	https://sketchfab.com/3d-models/tesla-model-y-2021-c0a86cac582d4b33aba0fb1b1912d970
+* author:	763468712 (https://sketchfab.com/763468712)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Tesla Model Y 2021" (https://sketchfab.com/3d-models/tesla-model-y-2021-c0a86cac582d4b33aba0fb1b1912d970) by 763468712 (https://sketchfab.com/763468712) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+Adaptations by Tina 3D Tesla: normalization, connected mesh-island separation, polygon reduction, studio materials. Mesh islands are not verified Tesla service parts.

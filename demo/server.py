@@ -307,12 +307,90 @@ class DecisionEngine:
             "mode": mode,
         }
 
+    def classify_jev(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle Jev-compatible structured classification request from official JevPilot frontend."""
+        state = payload.get("state", {})
+        questions = payload.get("questions", {})
+        answers: Dict[str, Any] = {}
+        total_input_tokens = 0
+
+        for q_key, q_data in questions.items():
+            instructions = q_data.get("instructions", "Choose optimal driving option.")
+            criteria = q_data.get("criteria", {})
+
+            # Prepare options
+            options = []
+            if isinstance(criteria, dict):
+                for opt_id, opt_desc in criteria.items():
+                    desc = str(opt_desc) if opt_desc is not None else f"Path {opt_id}"
+                    options.append({"id": str(opt_id), "description": desc})
+            elif isinstance(criteria, list):
+                for item in criteria:
+                    options.append({"id": str(item), "description": f"Level {item}"})
+
+            if not options:
+                continue
+
+            if self.use_mock or self.model is None:
+                # Mock: pick candidate path that has no predicted collision
+                candidates = state.get("candidates", {}) if isinstance(state, dict) else {}
+                best_choice = options[0]["id"]
+                for opt in options:
+                    cand_vec = candidates.get(opt["id"])
+                    # candidates vector: [speed, steer, route_error, offroad_fraction, collision, stop_at_line]
+                    if cand_vec and len(cand_vec) >= 5 and not cand_vec[4]:  # collision is false
+                        best_choice = opt["id"]
+                        break
+                probs = {opt["id"]: 1.0 / len(options) for opt in options}
+                probs[best_choice] = max(probs[best_choice], 0.75)
+                norm = sum(probs.values())
+                probs = {k: v / norm for k, v in probs.items()}
+                answers[q_key] = {"choice": best_choice, "probabilities": probs}
+                total_input_tokens += 120
+            else:
+                row = {
+                    "id": f"jev_{int(time.time() * 1000)}_{q_key}",
+                    "state": state,
+                    "question": instructions,
+                    "options": options,
+                }
+                prior = self.prior_logits[:len(options)] if len(options) <= len(self.prior_logits) else None
+                scored = score(
+                    self.model,
+                    self.tokenizer,
+                    row,
+                    {},
+                    sliced_head=True,
+                    prior_logits=prior,
+                    graph_runner=self.graph_runner,
+                )
+                total_input_tokens += scored.get("input_tokens", 150)
+                prob_dict = {opt["id"]: p for opt, p in zip(options, scored["probabilities"])}
+                chosen_idx = max(range(len(scored["probabilities"])), key=scored["probabilities"].__getitem__)
+                best_choice = options[chosen_idx]["id"]
+
+                answers[q_key] = {
+                    "choice": best_choice,
+                    "probabilities": prob_dict,
+                }
+
+        self.stats["total_decisions"] += 1
+
+        return {
+            "model": self.model_name,
+            "answers": answers,
+            "usage": {
+                "input_tokens": total_input_tokens,
+                "output_tokens": 0,
+            },
+        }
+
 
 # Initialize FastAPI app
 app = FastAPI(
     title="SemIf Decision Server",
     description="Real-time sub-15ms semantic decision server for JevPilot Three.js autonomous driving simulator.",
-    version="0.1.0",
+    version="0.2.0",
 )
 
 app.add_middleware(
@@ -326,40 +404,52 @@ app.add_middleware(
 engine: Optional[DecisionEngine] = None
 
 
+def get_engine() -> DecisionEngine:
+    global engine
+    if engine is None:
+        engine = DecisionEngine(use_mock=True)
+    return engine
+
+
 @app.get("/health")
 async def health_check():
-    assert engine is not None
+    eng = get_engine()
     avg_latency = (
-        engine.stats["total_latency_ms"] / engine.stats["total_decisions"]
-        if engine.stats["total_decisions"] > 0
+        eng.stats["total_latency_ms"] / eng.stats["total_decisions"]
+        if eng.stats["total_decisions"] > 0
         else 0.0
     )
     return {
         "status": "online",
-        "model": engine.model_name,
-        "device": engine.device,
-        "mock_mode": engine.use_mock,
-        "cuda_graph_enabled": engine.graph_runner is not None,
-        "decisions_served": engine.stats["total_decisions"],
+        "model": eng.model_name,
+        "device": eng.device,
+        "mock_mode": eng.use_mock,
+        "cuda_graph_enabled": eng.graph_runner is not None,
+        "decisions_served": eng.stats["total_decisions"],
         "avg_latency_ms": round(avg_latency, 2),
-        "min_latency_ms": round(engine.stats["min_latency_ms"], 2) if engine.stats["min_latency_ms"] != float("inf") else 0.0,
-        "max_latency_ms": round(engine.stats["max_latency_ms"], 2),
+        "min_latency_ms": round(eng.stats["min_latency_ms"], 2) if eng.stats["min_latency_ms"] != float("inf") else 0.0,
+        "max_latency_ms": round(eng.stats["max_latency_ms"], 2),
     }
+
+
+@app.post("/v1/classifier")
+@app.post("/v1/systemone")
+async def classifier_endpoint(payload: Dict[str, Any]):
+    return get_engine().classify_jev(payload)
 
 
 @app.post("/decide")
 async def decide_endpoint(payload: Dict[str, Any]):
-    assert engine is not None
     mode = payload.get("mode", "semif")
     telemetry = payload.get("telemetry", payload)
-    return engine.decide(telemetry, mode=mode)
+    return get_engine().decide(telemetry, mode=mode)
 
 
 @app.websocket("/stream-decide")
 async def websocket_stream_decide(websocket: WebSocket):
     await websocket.accept()
     logger.info("WebSocket client connected to /stream-decide")
-    assert engine is not None
+    eng = get_engine()
     try:
         while True:
             text_data = await websocket.receive_text()
@@ -371,7 +461,7 @@ async def websocket_stream_decide(websocket: WebSocket):
             mode = data.get("mode", "semif")
             telemetry = data.get("telemetry", data)
 
-            result = engine.decide(telemetry, mode=mode)
+            result = eng.decide(telemetry, mode=mode)
             result["server_timestamp"] = time.time()
 
             await websocket.send_json(result)

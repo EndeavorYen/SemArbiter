@@ -4,6 +4,6 @@ __pycache__/
 *.pyc
 results*.jsonl
 reranker-results*.jsonl
-models/
-cache/
+/models/
+/cache/
 *.egg-info/

@@ -117,3 +117,36 @@ def test_websocket_stream_decide(mock_engine):
         assert resp["action"] in ACTION_IDS
         assert "server_timestamp" in resp
         assert "probabilities" in resp
+
+
+def test_v1_classifier_endpoint(mock_engine):
+    client = TestClient(app)
+    req_body = {
+        "model": "SemIf/Qwen2.5-3B-Instruct",
+        "state": {
+            "speed_mps": 12.0,
+            "on_road": True,
+            "candidates": {
+                "v0": [12.0, 0.0, 0.1, 0.0, False, False],
+                "v1": [12.0, -0.2, 0.3, 0.0, True, False],  # has collision
+            }
+        },
+        "questions": {
+            "vector": {
+                "type": "choice",
+                "instructions": "Choose a safe driving path.",
+                "criteria": {
+                    "v0": "maintain lane safely",
+                    "v1": "swerve left with collision risk"
+                }
+            }
+        }
+    }
+    resp = client.post("/v1/classifier", json=req_body)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "answers" in data
+    assert "vector" in data["answers"]
+    assert data["answers"]["vector"]["choice"] == "v0"
+    assert "probabilities" in data["answers"]["vector"]
+    assert "usage" in data
