@@ -444,7 +444,7 @@ class DecisionEngine:
 
             candidates = state.get("candidates", {}) if isinstance(state, dict) else {}
 
-            if self.use_mock or self.model is None:
+            if self.use_mock or self.model is None or mode == "heuristic":
                 best_choice = options[0]["id"]
                 ranked_candidates = []
 
@@ -512,9 +512,21 @@ class DecisionEngine:
                         final_options.append({"id": opt["id"], "description": desc})
                     use_prior = self.prior_logits[:len(options)] if len(options) <= len(self.prior_logits) else None
 
+                def _sanitize_finite_json(val: Any) -> Any:
+                    if isinstance(val, float):
+                        if math.isnan(val) or math.isinf(val):
+                            return "ANOMALY_CORRUPTED"
+                        return val
+                    elif isinstance(val, dict):
+                        return {k: _sanitize_finite_json(v) for k, v in val.items()}
+                    elif isinstance(val, list):
+                        return [_sanitize_finite_json(v) for v in val]
+                    return val
+
+                sanitized_state = _sanitize_finite_json(state)
                 row = {
                     "id": f"jev_{int(time.time() * 1000)}_{q_key}",
-                    "state": state,
+                    "state": sanitized_state,
                     "question": final_instructions,
                     "options": final_options,
                 }
