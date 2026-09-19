@@ -364,16 +364,22 @@ class DecisionEngine:
         }
 
     def classify_jev(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle Jev-compatible structured classification request from JevPilot 2.0 frontend with Tier 1/2 reasoning."""
+        """Handle Jev-compatible structured classification request with selectable strategy mode (flat vs semif_hierarchical)."""
         state = payload.get("state", {})
         questions = payload.get("questions", {})
+        mode = payload.get("mode", "semif_hierarchical")
         answers: Dict[str, Any] = {}
         total_input_tokens = 0
 
         # Tier 1 Strategic Maneuver analysis
-        tier1 = self._determine_tier1_maneuver(state)
-        strategic_intent = tier1["intent"]
-        strategic_directive = tier1["directive"]
+        if mode == "flat":
+            strategic_intent = "NONE (Flat 1-of-N)"
+            strategic_directive = "Naive unconstrained flat action selection."
+            tier1 = {"intent": strategic_intent, "directive": strategic_directive}
+        else:
+            tier1 = self._determine_tier1_maneuver(state)
+            strategic_intent = tier1["intent"]
+            strategic_directive = tier1["directive"]
 
         for q_key, q_data in questions.items():
             instructions = q_data.get("instructions", "Choose optimal driving option.")
@@ -395,7 +401,6 @@ class DecisionEngine:
             candidates = state.get("candidates", {}) if isinstance(state, dict) else {}
 
             if self.use_mock or self.model is None:
-                # Hierarchical Mock: Apply Tier 1 constraints
                 best_choice = options[0]["id"]
                 ranked_candidates = []
 
@@ -410,6 +415,9 @@ class DecisionEngine:
                             score_val = -1000.0
                         elif offroad > 0.1:
                             score_val = -500.0
+                        elif mode == "flat":
+                            # Naive flat scoring: prioritizes speed, ignores red lights & speed limit
+                            score_val = speed * 10.0 - r_err * 2.0
                         elif strategic_intent == "YIELD_RED_LIGHT":
                             # Heavily prioritize stopping at line with 0 velocity
                             score_val = 100.0 if stop_line else (-200.0 - speed * 10)
@@ -431,35 +439,39 @@ class DecisionEngine:
                 answers[q_key] = {"choice": best_choice, "probabilities": probs}
                 total_input_tokens += 120
             else:
-                # Hierarchical Neural SemIf: Condition instructions with Tier 1 Strategic Directive
-                enhanced_instructions = f"STRATEGIC DIRECTIVE: {strategic_directive}\n{instructions}"
-                
-                # Annotate option descriptions with vehicle vector telemetry
-                annotated_options = []
-                for opt in options:
-                    cand_vec = candidates.get(opt["id"])
-                    if cand_vec and len(cand_vec) >= 6:
-                        sp, st, re, of, col, stp = cand_vec[:6]
-                        tag = f"speed: {sp:.1f}m/s, steer: {st:+.2f}, collision: {col}, stop_at_line: {stp}"
-                        desc = f"{opt['description']} [{tag}]"
-                    else:
-                        desc = opt["description"]
-                    annotated_options.append({"id": opt["id"], "description": desc})
+                # Neural SemIf
+                if mode == "flat":
+                    final_instructions = instructions
+                    final_options = options
+                    use_prior = None  # No prior calibration for flat baseline
+                else:
+                    # Hierarchical Neural SemIf: Condition instructions with Tier 1 Strategic Directive
+                    final_instructions = f"STRATEGIC DIRECTIVE: {strategic_directive}\n{instructions}"
+                    final_options = []
+                    for opt in options:
+                        cand_vec = candidates.get(opt["id"])
+                        if cand_vec and len(cand_vec) >= 6:
+                            sp, st, re, of, col, stp = cand_vec[:6]
+                            tag = f"speed: {sp:.1f}m/s, steer: {st:+.2f}, collision: {col}, stop_at_line: {stp}"
+                            desc = f"{opt['description']} [{tag}]"
+                        else:
+                            desc = opt["description"]
+                        final_options.append({"id": opt["id"], "description": desc})
+                    use_prior = self.prior_logits[:len(options)] if len(options) <= len(self.prior_logits) else None
 
                 row = {
                     "id": f"jev_{int(time.time() * 1000)}_{q_key}",
                     "state": state,
-                    "question": enhanced_instructions,
-                    "options": annotated_options,
+                    "question": final_instructions,
+                    "options": final_options,
                 }
-                prior = self.prior_logits[:len(options)] if len(options) <= len(self.prior_logits) else None
                 scored = score(
                     self.model,
                     self.tokenizer,
                     row,
                     {},
                     sliced_head=True,
-                    prior_logits=prior,
+                    prior_logits=use_prior,
                     graph_runner=self.graph_runner,
                 )
                 total_input_tokens += scored.get("input_tokens", 150)
