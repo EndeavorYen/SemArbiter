@@ -8,7 +8,7 @@ import inspect
 import json
 import time
 
-from .core import direct_messages, softmax
+from .core import direct_messages, json_compact, softmax
 from .direct import PROMPT_VERSION, encode_prompt
 
 
@@ -24,7 +24,7 @@ def _state_prefix(tokenizer, state) -> list[int]:
         turns, tokenize=False, add_generation_prompt=True, enable_thinking=False
     )
     payload = turns[-1]["content"]
-    evidence = json.dumps({"evidence": state}, ensure_ascii=False)[:-1]
+    evidence = json_compact({"evidence": state})[:-1]
     if prompt.count(payload) != 1 or not payload.startswith(evidence):
         raise ValueError("Cannot establish a deterministic evidence prefix")
     text = prompt[: prompt.index(payload)] + evidence

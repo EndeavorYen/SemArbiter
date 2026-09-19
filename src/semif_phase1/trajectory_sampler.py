@@ -7,6 +7,7 @@ Web 3D and the Python loop share this option contract; they do not share a world
 from __future__ import annotations
 
 import math
+import os
 import random
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -20,6 +21,71 @@ VECTOR_COLUMNS = (
     "stop_at_line",
 )
 VECTOR_INSTRUCTIONS = "Choose a safe driving path."
+
+# Keys allowed in the model prompt. Candidates live only as choice options.
+PROMPT_STATE_KEYS = (
+    "speed_mps",
+    "speed_ceiling_mps",
+    "on_road",
+    "intersection",
+    "pedestrian",
+    "roadside_obstacle",
+    "construction",
+    "other_vehicle",
+    "emergency_vehicle",
+    "anomaly",
+)
+
+
+_SLIM_OBJECT_KEYS = {
+    "intersection": ("control", "distance_to_line_m", "signal"),
+    "pedestrian": ("distance_m", "lateral_offset_m"),
+    "roadside_obstacle": ("distance_m", "lateral_offset_m"),
+    "construction": ("distance_m", "sign"),
+    "other_vehicle": ("distance_m", "arriving"),
+    "emergency_vehicle": ("distance_m", "behind", "siren"),
+}
+
+
+def compact_jev_state(state: Any) -> Dict[str, Any]:
+    if not isinstance(state, dict):
+        return {}
+    packed: Dict[str, Any] = {}
+    for key in PROMPT_STATE_KEYS:
+        if key not in state or state[key] is None:
+            continue
+        value = state[key]
+        allowed = _SLIM_OBJECT_KEYS.get(key)
+        if allowed and isinstance(value, dict):
+            packed[key] = {inner: value[inner] for inner in allowed if inner in value}
+        else:
+            packed[key] = value
+    return packed
+
+
+# csv = shortest. words = 512-bucket Pareto default. verbose = richer English, 1024 bucket.
+OPTION_TAG_STYLE = os.environ.get("SEMIF_OPTION_TAG", "words")
+
+
+def vector_option_tag(vec: Sequence[Any], style: Optional[str] = None) -> str:
+    speed, steer, _route, offroad, collision, stop_at_line = vec[:6]
+    speed_f = float(speed)
+    steer_f = float(steer)
+    off_f = float(offroad)
+    hit = bool(collision)
+    halt = bool(stop_at_line)
+    chosen = style or OPTION_TAG_STYLE
+    if chosen == "csv":
+        return f"{speed_f:.1f},{steer_f:+.2f},{off_f:.2f},{int(hit)},{int(halt)}"
+    if chosen == "verbose":
+        return (
+            f"speed {speed_f:.1f} m/s, steer {steer_f:+.2f}, "
+            f"collision {hit}, stop_at_line {halt}"
+        )
+    return (
+        f"{speed_f:.1f}m/s steer {steer_f:+.2f} "
+        f"collision={'yes' if hit else 'no'} halt={'yes' if halt else 'no'}"
+    )
 
 
 # Planner worker (demo/jevpilot/assets/planner.worker-*.js) policy, 1D track rewrite.

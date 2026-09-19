@@ -9,6 +9,11 @@ import re
 from pathlib import Path
 
 LETTERS = "ABCDEFGHIJKLMNOP"
+
+
+def json_compact(value: object) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
 DIRECT_SYSTEM = (
     "Apply the supplied criterion to the supplied evidence. Choose exactly one listed option. "
     "Respond with only its uppercase letter, with no explanation or reasoning."
@@ -52,7 +57,7 @@ def direct_messages(row: dict) -> list[dict]:
     }
     return [
         {"role": "system", "content": DIRECT_SYSTEM},
-        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+        {"role": "user", "content": json_compact(payload)},
     ]
 
 

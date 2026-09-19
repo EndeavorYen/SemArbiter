@@ -440,11 +440,6 @@ def run_jevpilot2_episode(
                 "raw_mode": raw_mode,
                 "state": obs,
                 "questions": {
-                    "motion": {
-                        "type": "choice",
-                        "instructions": "Decide drive or stop.",
-                        "criteria": {"drive": None, "stop": None},
-                    },
                     "vector": {
                         "type": "choice",
                         "instructions": VECTOR_INSTRUCTIONS,
