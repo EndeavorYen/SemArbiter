@@ -1,8 +1,11 @@
 import inspect
 
 from semif_phase1.trajectory_sampler import (
+    PLAN_POINTS,
+    STEER_LIMIT,
     VECTOR_COLUMNS,
     VECTOR_INSTRUCTIONS,
+    planning_max,
     sample_trajectories,
 )
 
@@ -35,6 +38,31 @@ def test_sampler_ignores_signal_semantics():
     green = sample_trajectories(ego_x=0.0, ego_z=10.0, speed=16.0, stop_line_z=55.0, seed=7)
     assert [s.stop_at_line for s in red.values()] == [s.stop_at_line for s in green.values()]
     assert any(s.stop_at_line or s.end_speed < 1.2 for s in red.values())
+
+
+def test_planner_policy_steer_horizon_and_ceiling():
+    assert STEER_LIMIT == 0.85
+    assert PLAN_POINTS == 31
+    samples = sample_trajectories(ego_x=0.0, ego_z=10.0, speed=16.0, stop_line_z=55.0, seed=42)
+    steers = [abs(s.steer) for s in samples.values()]
+    assert max(steers) > 0.4
+    assert all(abs(s.steer) <= STEER_LIMIT + 1e-6 for s in samples.values())
+    capped = sample_trajectories(
+        ego_x=0.0, ego_z=0.0, speed=16.0, speed_ceiling=8.0, seed=1
+    )
+    assert planning_max(16.0, 8.0) == 8.0
+    assert max(s.speed for s in capped.values()) <= 8.0 + 1e-6
+
+
+def test_collision_radius_matches_closed_loop_pedestrian():
+    samples = sample_trajectories(
+        ego_x=0.0,
+        ego_z=0.0,
+        speed=16.0,
+        obstacles=[{"kind": "pedestrian", "x": 0.0, "z": 8.0}],
+        seed=3,
+    )
+    assert any(s.collision for s in samples.values())
 
 
 def test_closed_loop_obs_uses_sampled_ids(engine=None):
