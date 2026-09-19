@@ -53,11 +53,6 @@ def test_action_space_consistency(mock_engine):
         "model": mock_engine.model_name,
         "state": obs,
         "questions": {
-            "motion": {
-                "type": "choice",
-                "instructions": "Decide drive or stop.",
-                "criteria": {"drive": None, "stop": None},
-            },
             "vector": {
                 "type": "choice",
                 "instructions": "Choose a safe driving path.",
@@ -71,11 +66,8 @@ def test_action_space_consistency(mock_engine):
         res = mock_engine.classify_jev(req)
 
         assert "answers" in res
-        assert "motion" in res["answers"]
+        assert "motion" not in res["answers"]
         assert "vector" in res["answers"]
-
-        # Choice valid in candidate domain
-        assert res["answers"]["motion"]["choice"] in ["drive", "stop"]
         assert res["answers"]["vector"]["choice"] in obs["candidates"]
         vec_probs = res["answers"]["vector"]["probabilities"]
         assert set(vec_probs) <= set(obs["candidates"])
@@ -92,7 +84,6 @@ def test_red_light_stopping(mock_engine):
         "model": mock_engine.model_name,
         "state": obs,
         "questions": {
-            "motion": {"type": "choice", "criteria": {"drive": None, "stop": None}},
             "vector": {"type": "choice", "criteria": {k: None for k in obs["candidates"].keys()}},
         },
     }
@@ -117,7 +108,6 @@ def test_pedestrian_casualty_prevention(mock_engine):
         "model": mock_engine.model_name,
         "state": obs,
         "questions": {
-            "motion": {"type": "choice", "criteria": {"drive": None, "stop": None}},
             "vector": {"type": "choice", "criteria": {k: None for k in obs["candidates"].keys()}},
         },
     }

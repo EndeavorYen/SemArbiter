@@ -30,7 +30,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from semif_phase1.action_tree import Branch, Leaf, Node, sensors_corrupt, walk_action_tree
-from semif_phase1.trajectory_sampler import partition_ids
+from semif_phase1.trajectory_sampler import compact_jev_state, partition_ids, vector_option_tag
 from semif_phase1.core import LETTERS, apply_prior_calibration, null_prompt_row, softmax
 from semif_phase1.direct import score
 from semif_phase1.gating import compute_free_energy, gate_decision
@@ -266,7 +266,9 @@ class DecisionEngine:
             try:
                 from semif_phase1.cuda_graph import BucketGraphRunner
                 logger.info("Initializing BucketGraphRunner for shape-bucketed inference...")
-                self.graph_runner = BucketGraphRunner(self.model, buckets=(256, 512), device="cuda", warmup_on_init=True)
+                self.graph_runner = BucketGraphRunner(
+                    self.model, buckets=(256, 512, 1024), device="cuda", warmup_on_init=True
+                )
                 logger.info("CUDA Graph buckets captured successfully.")
             except Exception as e:
                 logger.warning(f"CUDA Graph warmup skipped or failed: {e}. Falling back to dynamic sliced LM head.")
@@ -799,6 +801,8 @@ class DecisionEngine:
 
             if not options:
                 continue
+            if q_key == "motion":
+                continue
 
             if q_key == "maneuver":
                 answers[q_key] = answers.get("maneuver") or {
@@ -868,13 +872,16 @@ class DecisionEngine:
                 for opt in options:
                     cand_vec = candidates.get(opt["id"]) if isinstance(candidates, dict) else None
                     if cand_vec and len(cand_vec) >= 6:
-                        sp, st, re, of, col, stp = cand_vec[:6]
-                        tag = f"speed: {sp:.1f}m/s, steer: {st:+.2f}, collision: {col}, stop_at_line: {stp}"
-                        desc = f"{opt['description']} [{tag}]"
+                        desc = vector_option_tag(cand_vec)
                     else:
                         desc = opt["description"]
                     final_options.append({"id": opt["id"], "description": desc})
-                neural_vec = self._score_neural_options(state, final_instructions, final_options, use_prior)
+                neural_vec = self._score_neural_options(
+                    compact_jev_state(state),
+                    final_instructions,
+                    final_options,
+                    use_prior,
+                )
                 total_input_tokens += neural_vec["input_tokens"]
                 answers[q_key] = {
                     "choice": neural_vec["choice"],

@@ -1,0 +1,99 @@
+{
+  "prompt": [
+    {
+      "style": "csv",
+      "tokens": 500,
+      "bucket": 512
+    },
+    {
+      "style": "words",
+      "tokens": 468,
+      "bucket": 512
+    },
+    {
+      "style": "verbose",
+      "tokens": 580,
+      "bucket": 1024
+    }
+  ],
+  "closed_loop": [
+    {
+      "style": "csv",
+      "clean_completion_rate": 0.35,
+      "incidents": {
+        "red_light": 2,
+        "pedestrian": 2,
+        "vehicle": 9,
+        "off_track": 0,
+        "speeding": 0
+      },
+      "latency_p50_ms": 48.49,
+      "latency_p99_ms": 86.49,
+      "scenario_completed": {
+        "traffic_light_red": 0,
+        "speed_zone_city": 2,
+        "pedestrian_jaywalking": 0,
+        "roadside_parked_hazard": 0,
+        "cut_in_vehicle": 0,
+        "sharp_curve": 2,
+        "sensor_anomaly": 2,
+        "ambiguous_priority": 0,
+        "construction_detour": 0,
+        "emergency_vehicle": 1
+      },
+      "wall_s": 46.5
+    },
+    {
+      "style": "words",
+      "clean_completion_rate": 0.75,
+      "incidents": {
+        "red_light": 2,
+        "pedestrian": 1,
+        "vehicle": 2,
+        "off_track": 0,
+        "speeding": 0
+      },
+      "latency_p50_ms": 48.95,
+      "latency_p99_ms": 52.0,
+      "scenario_completed": {
+        "traffic_light_red": 0,
+        "speed_zone_city": 2,
+        "pedestrian_jaywalking": 1,
+        "roadside_parked_hazard": 2,
+        "cut_in_vehicle": 1,
+        "sharp_curve": 2,
+        "sensor_anomaly": 2,
+        "ambiguous_priority": 2,
+        "construction_detour": 2,
+        "emergency_vehicle": 1
+      },
+      "wall_s": 92.2
+    },
+    {
+      "style": "verbose",
+      "clean_completion_rate": 0.85,
+      "incidents": {
+        "red_light": 2,
+        "pedestrian": 0,
+        "vehicle": 0,
+        "off_track": 1,
+        "speeding": 0
+      },
+      "latency_p50_ms": 88.63,
+      "latency_p99_ms": 92.1,
+      "scenario_completed": {
+        "traffic_light_red": 0,
+        "speed_zone_city": 2,
+        "pedestrian_jaywalking": 2,
+        "roadside_parked_hazard": 2,
+        "cut_in_vehicle": 2,
+        "sharp_curve": 2,
+        "sensor_anomaly": 1,
+        "ambiguous_priority": 2,
+        "construction_detour": 2,
+        "emergency_vehicle": 2
+      },
+      "wall_s": 174.5
+    }
+  ]
+}

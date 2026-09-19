@@ -34,7 +34,6 @@ def _choose(engine, sim, mode, raw_mode=False):
         "raw_mode": raw_mode,
         "state": obs,
         "questions": {
-            "motion": {"type": "choice", "criteria": {"drive": None, "stop": None}},
             "vector": {"type": "choice", "criteria": {k: None for k in obs["candidates"]}},
         },
     }

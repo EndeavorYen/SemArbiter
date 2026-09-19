@@ -5,9 +5,36 @@ from semif_phase1.trajectory_sampler import (
     STEER_LIMIT,
     VECTOR_COLUMNS,
     VECTOR_INSTRUCTIONS,
+    compact_jev_state,
     planning_max,
     sample_trajectories,
+    vector_option_tag,
 )
+
+
+def test_vector_option_tag_is_short():
+    csv = vector_option_tag([16.2, -0.14, 0.3, 0.0, False, True], style="csv")
+    assert csv == "16.2,-0.14,0.00,0,1"
+    words = vector_option_tag([16.2, -0.14, 0.3, 0.0, False, True], style="words")
+    assert "collision=no" in words and "halt=yes" in words
+    verbose = vector_option_tag([16.2, -0.14, 0.3, 0.0, False, True], style="verbose")
+    assert "stop_at_line True" in verbose
+
+
+def test_compact_state_drops_candidates():
+    packed = compact_jev_state(
+        {
+            "speed_mps": 16.0,
+            "intersection": {"signal": "red"},
+            "candidates": {"t00": [16, 0, 0, 0, False, False]},
+            "candidate_meta": {"t00": {"description": "long"}},
+            "seed": 1,
+        }
+    )
+    assert "candidates" not in packed
+    assert "candidate_meta" not in packed
+    assert packed["speed_mps"] == 16.0
+    assert packed["intersection"]["signal"] == "red"
 
 
 def test_option_contract_has_no_signal_and_no_stop_coaching():
