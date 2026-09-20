@@ -30,13 +30,14 @@ for _path in (REPO_ROOT, REPO_ROOT / "src"):
 from demo.server import DecisionEngine
 from semif_phase1.control_diagnostics import (
     Diagnosis,
+    cluster_diagnoses,
     diagnose_trace,
     format_issue_body,
     format_issue_title,
     format_report,
     make_sample,
 )
-from semif_phase1.trajectory_sampler import vector_option_tag
+from semif_phase1.trajectory_sampler import compact_jev_state, vector_option_tag
 from benchmarks.benchmark_jevpilot_hierarchical import (
     ALL_SCENARIOS,
     run_jevpilot2_episode,
@@ -51,12 +52,43 @@ ISSUE_CAP = 3
 REPO = "EndeavorYen/SemIf"
 
 
-def sample_from_env(env: Any, chosen_id: str, chosen_vec: Sequence[Any]) -> Dict[str, Any]:
+def menu_from_obs(obs: Optional[Dict[str, Any]], env: Any) -> List[Dict[str, Any]]:
+    if not obs:
+        return []
+    signal = None
+    if getattr(env, "intersection", None):
+        signal = env.intersection.get("signal")
+    menu: List[Dict[str, Any]] = []
+    for cid, vec in (obs.get("candidates") or {}).items():
+        row = list(vec)
+        while len(row) < 6:
+            row.append(0.0)
+        tag = vector_option_tag(row, ego_x=env.x, signal=signal)
+        menu.append(
+            {
+                "id": str(cid),
+                "speed": float(row[0]),
+                "offset": float(row[2]),
+                "collision": bool(row[4]),
+                "tag": tag,
+            }
+        )
+    return menu
+
+
+def sample_from_env(
+    env: Any,
+    chosen_id: str,
+    chosen_vec: Sequence[Any],
+    obs: Optional[Dict[str, Any]] = None,
+    prev_id: Optional[str] = None,
+) -> Dict[str, Any]:
     signal = None
     if getattr(env, "intersection", None):
         signal = env.intersection.get("signal")
     tags = vector_option_tag(list(chosen_vec), ego_x=env.x, signal=signal) if chosen_vec else str(chosen_id)
     chosen_speed = float(chosen_vec[0]) if chosen_vec else float(env.speed_mps)
+    packed = compact_jev_state(obs) if isinstance(obs, dict) else None
     return make_sample(
         t=float(env.t),
         x=float(env.x),
@@ -68,6 +100,9 @@ def sample_from_env(env: Any, chosen_id: str, chosen_vec: Sequence[Any]) -> Dict
         chosen_tags=tags,
         signal=signal,
         chosen_speed=chosen_speed,
+        menu=menu_from_obs(obs, env),
+        compact_state=packed,
+        action_switch=bool(prev_id) and prev_id != str(chosen_id),
     )
 
 
@@ -82,9 +117,19 @@ def collect_episode(
     use_camera_obstacles: bool = True,
 ) -> tuple[Dict[str, Any], List[Dict[str, Any]]]:
     trace: List[Dict[str, Any]] = []
+    prev_id: Optional[str] = None
 
-    def on_step(env: Any, chosen_id: str, chosen_vec: Sequence[Any]) -> None:
-        trace.append(sample_from_env(env, chosen_id, chosen_vec))
+    def on_step(
+        env: Any,
+        chosen_id: str,
+        chosen_vec: Sequence[Any],
+        obs: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        nonlocal prev_id
+        trace.append(
+            sample_from_env(env, chosen_id, chosen_vec, obs=obs, prev_id=prev_id)
+        )
+        prev_id = str(chosen_id)
 
     episode = run_jevpilot2_episode(
         engine,
@@ -118,7 +163,14 @@ def diagnose_episode(
         vision_mode=vision_mode,
         use_camera_obstacles=use_camera_obstacles,
     )
-    diagnosis = diagnose_trace(trace, seed=seed, scenario=scenario, mode=mode)
+    diagnosis = diagnose_trace(
+        trace,
+        seed=seed,
+        scenario=scenario,
+        mode=mode,
+        collision=bool(episode.get("collision")),
+        t_end=float(trace[-1]["t"]) if trace else 0.0,
+    )
     return episode, diagnosis
 
 
@@ -129,8 +181,9 @@ def file_issue(
     repo: str = REPO,
 ) -> Dict[str, Any]:
     """Create a GitHub issue. Tests inject `runner`; live path uses `gh`."""
-    if diagnosis.ok:
-        return {"filed": False, "reason": "clean"}
+    actionable = [v for v in diagnosis.violations if v.actionable]
+    if not actionable:
+        return {"filed": False, "reason": "expected" if diagnosis.violations else "clean"}
     title = format_issue_title(diagnosis)
     body = format_issue_body(diagnosis)
     run = runner or subprocess.run
@@ -251,6 +304,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         len(jobs),
     )
     rows: List[Dict[str, Any]] = []
+    diagnoses: List[Diagnosis] = []
     filed = 0
     t0 = time.perf_counter()
     for scenario, seed in jobs:
@@ -270,29 +324,56 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "mode": mode,
             "ok": diagnosis.ok,
             "violations": [
-                {"kind": v.kind, "t0": v.t0, "metrics": v.metrics}
+                {
+                    "kind": v.kind,
+                    "cause": v.cause,
+                    "layer": v.layer,
+                    "actionable": v.actionable,
+                    "t0": v.t0,
+                    "metrics": v.metrics,
+                }
                 for v in diagnosis.violations
             ],
+            "phase_plane": (diagnosis.frame or {}).get("phase_plane"),
             "completed": episode.get("completed"),
             "collision": episode.get("collision"),
             "red_light_violation": episode.get("red_light_violation"),
             "off_track": episode.get("off_track"),
         }
-        if args.file_issues and not diagnosis.ok and filed < ISSUE_CAP:
-            result = file_issue(diagnosis)
-            row["issue"] = result
-            filed += int(bool(result.get("filed")))
-            logger.info("issue create: %s", result)
+        diagnoses.append(diagnosis)
         rows.append(row)
     elapsed = time.perf_counter() - t0
     n_fail = sum(1 for r in rows if not r["ok"])
+    n_flagged = sum(1 for r in rows if r["violations"])
+    clusters = cluster_diagnoses(diagnoses)
+    if args.file_issues:
+        by_key = {}
+        for diagnosis in diagnoses:
+            acts = [v for v in diagnosis.violations if v.actionable]
+            if not acts:
+                continue
+            key = (diagnosis.scenario or "-", acts[0].cause)
+            by_key.setdefault(key, diagnosis)
+        for group in clusters:
+            if filed >= ISSUE_CAP:
+                break
+            key = (group["scenario"] or "-", group["cause"])
+            src = by_key.get(key)
+            if src is None:
+                continue
+            result = file_issue(src)
+            result["seeds"] = group["seeds"]
+            filed += int(bool(result.get("filed")))
+            logger.info("issue create: %s", result)
     summary = {
         "benchmark": "control_quality_observer",
         "mode": mode,
         "n_episodes": len(rows),
+        "n_flagged": n_flagged,
         "n_fail": n_fail,
         "elapsed_s": round(elapsed, 2),
         "file_issues": bool(args.file_issues),
+        "clusters": clusters,
         "episodes": rows,
     }
     print(

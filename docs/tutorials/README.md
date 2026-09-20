@@ -21,3 +21,5 @@
 | **[教程 11](11_jevpilot_latency_accuracy_tradeoff.md)** | JevPilot 延遲與正確度取捨 | 3108 token 撐破 Graph 桶、compact state、words vs csv vs verbose、seed 42 閉環 A/B | [#86](https://github.com/EndeavorYen/SemIf/issues/86) |
 | **[教程 12](12_jevpilot_vision.md)** | JevPilot 視覺輸入 | Canvas → CLIP 零樣本證據 → SemIf 選本幀軌；像素不進 prompt | [#90](https://github.com/EndeavorYen/SemIf/issues/90) [#48](https://github.com/EndeavorYen/SemIf/issues/48) |
 | **[教程 13](13_semif_vision_routes_and_tradeoffs.md)** | SemIf-Vision 多模態路線分析與架構抉擇 | 幀時序事件、P0 #105+#106、P1 #108+#102、P2 #103+#107 | [#89](https://github.com/EndeavorYen/SemIf/issues/89) [#48](https://github.com/EndeavorYen/SemIf/issues/48) |
+| **[教程 14](14_simulation_testing_and_control_quality.md)** | 模擬測試（Headless SIL）設計與考量 | 感知與控制解耦、倖存者偏差、相平面特徵（Phase-Plane）、候選池覆蓋度 vs 評分失衡因果歸因 | [#117](https://github.com/EndeavorYen/SemIf/issues/117) [#118](https://github.com/EndeavorYen/SemIf/issues/118) |
+

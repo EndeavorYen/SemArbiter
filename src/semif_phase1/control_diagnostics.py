@@ -40,6 +40,17 @@ KIND_TITLE = {
 _SPARK = "▁▂▃▄▅▆▇█"
 
 
+OOD_SCENARIOS = frozenset({"sensor_anomaly"})
+EXPECTED_SCENARIOS = frozenset({"sensor_anomaly", "construction_detour"})
+SAMPLER_MIN_OFFSET_M = 0.15
+POLICY_CENTER_OFFSET_M = 0.05
+TRUNCATION_S = 2.0
+CAUSE_INVALID = "INVALID_COLLISION_TRUNCATED"
+CAUSE_SAMPLER = "SAMPLER_DEFECT"
+CAUSE_POLICY = "POLICY_DEFECT"
+CAUSE_EXPECTED = "EXPECTED_SCENARIO_MANEUVER"
+
+
 def make_sample(
     *,
     t: float,
@@ -52,6 +63,11 @@ def make_sample(
     chosen_tags: str = "",
     signal: Optional[str] = None,
     chosen_speed: Optional[float] = None,
+    menu: Optional[Sequence[MappingLike]] = None,
+    compact_state: Optional[MappingLike] = None,
+    action_switch: bool = False,
+    cand_min_offset: Optional[float] = None,
+    cand_safe_count: Optional[int] = None,
 ) -> Dict[str, Any]:
     row: Dict[str, Any] = {
         "t": float(t),
@@ -63,9 +79,23 @@ def make_sample(
         "chosen_id": str(chosen_id or ""),
         "chosen_tags": str(chosen_tags or ""),
         "signal": signal,
+        "action_switch": bool(action_switch),
     }
     if chosen_speed is not None:
         row["chosen_speed"] = float(chosen_speed)
+    if menu is not None:
+        row["menu"] = [dict(item) for item in menu]
+        safe = [item for item in row["menu"] if not item.get("collision")]
+        row["cand_safe_count"] = len(safe)
+        if safe:
+            row["cand_min_offset"] = min(abs(float(item.get("offset", 0.0) or 0.0)) for item in safe)
+        else:
+            row["cand_min_offset"] = None
+    else:
+        row["cand_safe_count"] = cand_safe_count
+        row["cand_min_offset"] = cand_min_offset
+    if compact_state is not None:
+        row["compact_state"] = dict(compact_state)
     return row
 
 
@@ -74,6 +104,9 @@ class Violation:
     kind: str
     t0: float
     metrics: Dict[str, Any] = field(default_factory=dict)
+    layer: str = "unknown"
+    cause: str = ""
+    actionable: bool = True
 
 
 @dataclass
@@ -85,6 +118,7 @@ class Diagnosis:
     scenario: Optional[str] = None
     mode: Optional[str] = None
     n_samples: int = 0
+    frame: Optional[Dict[str, Any]] = None
 
 
 def _dt(samples: Sequence[MappingLike]) -> float:
@@ -318,27 +352,152 @@ def sparkline(values: Sequence[float], width: int = 40) -> str:
     return "".join(out)
 
 
+def _nearest(samples: Sequence[MappingLike], t0: float) -> MappingLike:
+    return min(samples, key=lambda s: abs(float(s["t"]) - t0))
+
+
+def _top3(menu: Sequence[MappingLike]) -> List[Dict[str, Any]]:
+    safe = [dict(item) for item in menu if not item.get("collision")]
+    safe.sort(key=lambda item: abs(float(item.get("offset", 99.0) or 99.0)))
+    return safe[:3]
+
+
+def _cand_min(sample: MappingLike) -> Optional[float]:
+    val = sample.get("cand_min_offset")
+    if val is None:
+        return None
+    return float(val)
+
+
+def phase_plane_label(samples: Sequence[MappingLike]) -> str:
+    if len(samples) < 4:
+        return "short_trace"
+    duration = float(samples[-1]["t"]) - float(samples[0]["t"])
+    xs = [float(s["lane_offset"]) for s in samples]
+    hz = _zero_cross_hz(xs, duration)
+    mean_abs = sum(abs(x) for x in xs) / len(xs)
+    if hz > STEER_ZERO_CROSS_HZ:
+        return "underdamped_oscillation"
+    if mean_abs > OFFSET_SIGMA_M:
+        return "steady_state_drift"
+    return "settled"
+
+
+def attribute_violation(
+    violation: Violation,
+    samples: Sequence[MappingLike],
+    *,
+    scenario: Optional[str] = None,
+    collision: bool = False,
+    t_end: Optional[float] = None,
+) -> Violation:
+    """Four-layer cause from #118. Does not invent a trajectory."""
+    end_t = float(t_end if t_end is not None else (samples[-1]["t"] if samples else 0.0))
+    if collision and end_t < TRUNCATION_S:
+        violation.cause = CAUSE_INVALID
+        violation.layer = "validity"
+        violation.actionable = True
+        return violation
+    scen = str(scenario or "")
+    if scen in EXPECTED_SCENARIOS:
+        if scen == "sensor_anomaly" and violation.kind in {"chatter", "wander", "deadlock"}:
+            violation.cause = CAUSE_EXPECTED
+            violation.layer = "scenario"
+            violation.actionable = False
+            return violation
+        if scen == "construction_detour" and violation.kind in {"wander", "deadband"}:
+            violation.cause = CAUSE_EXPECTED
+            violation.layer = "scenario"
+            violation.actionable = False
+            return violation
+    frame = _nearest(samples, violation.t0) if samples else {}
+    cand_min = _cand_min(frame)
+    if violation.kind in {"deadband", "wander"} and cand_min is not None:
+        if cand_min > SAMPLER_MIN_OFFSET_M:
+            violation.cause = CAUSE_SAMPLER
+            violation.layer = "sampler"
+            violation.actionable = True
+            return violation
+        if cand_min < POLICY_CENTER_OFFSET_M:
+            violation.cause = CAUSE_POLICY
+            violation.layer = "policy"
+            violation.actionable = True
+            return violation
+    if violation.kind == "chatter":
+        menu = list(frame.get("menu") or [])
+        forward = [
+            item
+            for item in menu
+            if not item.get("collision") and float(item.get("speed") or 0.0) >= 0.0
+        ]
+        violation.cause = CAUSE_POLICY if forward else CAUSE_SAMPLER
+        violation.layer = "policy" if forward else "sampler"
+        violation.actionable = True
+        return violation
+    violation.cause = violation.cause or CAUSE_POLICY
+    violation.layer = violation.layer or "policy"
+    violation.actionable = True
+    return violation
+
+
 def diagnose_trace(
     samples: Iterable[MappingLike],
     *,
     seed: Optional[int] = None,
     scenario: Optional[str] = None,
     mode: Optional[str] = None,
+    collision: bool = False,
+    t_end: Optional[float] = None,
 ) -> Diagnosis:
     rows = [dict(s) for s in samples]
+    end_t = float(t_end if t_end is not None else (rows[-1]["t"] if rows else 0.0))
     detectors = (_wander, _chatter, _deadband, _deadlock)
     violations = [hit for fn in detectors if (hit := fn(rows)) is not None]
+    if collision and end_t < TRUNCATION_S:
+        violations.insert(
+            0,
+            Violation(
+                kind="truncated",
+                t0=end_t,
+                metrics={"t_end": round(end_t, 3), "collision": True},
+                layer="validity",
+                cause=CAUSE_INVALID,
+                actionable=True,
+            ),
+        )
+    for v in violations:
+        if v.cause == CAUSE_INVALID:
+            continue
+        attribute_violation(
+            v, rows, scenario=scenario, collision=collision, t_end=end_t
+        )
+        if collision and end_t < TRUNCATION_S:
+            v.actionable = False
     sl: List[Dict[str, Any]] = []
+    frame: Optional[Dict[str, Any]] = None
     if violations:
         sl = _slice_around(rows, violations[0].t0)
+        nearest = _nearest(rows, violations[0].t0) if rows else {}
+        menu = list(nearest.get("menu") or [])
+        frame = {
+            "t": nearest.get("t"),
+            "chosen_id": nearest.get("chosen_id"),
+            "chosen_tags": nearest.get("chosen_tags"),
+            "cand_min_offset": nearest.get("cand_min_offset"),
+            "cand_safe_count": nearest.get("cand_safe_count"),
+            "top3": _top3(menu),
+            "phase_plane": phase_plane_label(sl or rows),
+        }
+    actionable = [v for v in violations if v.actionable]
     return Diagnosis(
-        ok=not violations,
+        ok=not actionable,
         violations=violations,
         slice=sl,
         seed=seed,
         scenario=scenario,
         mode=mode,
         n_samples=len(rows),
+        frame=frame,
     )
 
 
@@ -352,8 +511,13 @@ def format_report(diagnosis: Diagnosis) -> str:
         lines.append("no fingerprint exceeded")
         return "\n".join(lines)
     for v in diagnosis.violations:
+        tag = f"[{v.cause}]" if v.cause else ""
+        lines.append(f"- {v.kind} {tag} at t={v.t0:.2f}s metrics={v.metrics}")
+    if diagnosis.frame:
         lines.append(
-            f"- {v.kind} at t={v.t0:.2f}s metrics={v.metrics}"
+            f"frame cand_min_offset={diagnosis.frame.get('cand_min_offset')} "
+            f"safe={diagnosis.frame.get('cand_safe_count')} "
+            f"phase={diagnosis.frame.get('phase_plane')}"
         )
     if diagnosis.slice:
         offsets = [float(s["lane_offset"]) for s in diagnosis.slice]
@@ -366,28 +530,46 @@ def format_report(diagnosis: Diagnosis) -> str:
     return "\n".join(lines)
 
 
+def _primary(diagnosis: Diagnosis) -> Optional[Violation]:
+    acts = [v for v in diagnosis.violations if v.actionable]
+    if acts:
+        return acts[0]
+    return diagnosis.violations[0] if diagnosis.violations else None
+
+
 def format_issue_title(diagnosis: Diagnosis) -> str:
     seed = diagnosis.seed if diagnosis.seed is not None else "?"
-    kind = diagnosis.violations[0].kind if diagnosis.violations else "Control"
-    label = KIND_TITLE.get(kind, kind.replace("_", " ").title())
-    return f"[Bug/Control] {label} Detected on Seed {seed}"
+    primary = _primary(diagnosis)
+    cause = primary.cause if primary else "Control"
+    kind = primary.kind if primary else "control"
+    return f"[Bug/Control] {cause} {kind} on Seed {seed}"
 
 
 def format_issue_body(diagnosis: Diagnosis) -> str:
     seed = diagnosis.seed if diagnosis.seed is not None else 42
     scenario = diagnosis.scenario or "speed_zone_city"
+    primary = _primary(diagnosis)
     lines = [
-        "Headless SIL observer (#117) flagged a control-quality fingerprint.",
+        "Headless SIL observer (#118) attributed a control-quality failure.",
         "",
         f"- scenario: `{scenario}`",
         f"- mode: `{diagnosis.mode or 'heuristic'}`",
         f"- seed: `{seed}`",
         "",
+        "## Attribution",
+        "",
+        f"- cause: `{primary.cause if primary else '-'}`",
+        f"- layer: `{primary.layer if primary else '-'}`",
+        f"- fingerprint: `{primary.kind if primary else '-'}` at t={primary.t0:.2f}s"
+        if primary
+        else "- fingerprint: -",
+        f"- phase-plane: `{diagnosis.frame.get('phase_plane') if diagnosis.frame else '-'}`",
+        "",
         "## Repro",
         "",
-        f"```",
-        f"python benchmarks/diagnose_control_quality.py --seed {seed}",
-        f"```",
+        "```",
+        f"python benchmarks/diagnose_control_quality.py --seed {seed} --scenario {scenario}",
+        "```",
         "",
         "## Thresholds",
         "",
@@ -395,12 +577,23 @@ def format_issue_body(diagnosis: Diagnosis) -> str:
         f"- chatter: speed < 0 in first {STARTUP_REVERSE_S:.0f}s, or ≥{CHATTER_SIGN_FLIPS} sign flips in {CHATTER_WINDOW_S:.0f}s",
         f"- deadband: after |offset| < {DEADBAND_ABS_M} m, drift > {DEADBAND_DRIFT_MPS} m/s with dwell < {DEADBAND_MIN_DWELL_S} s",
         f"- deadlock: |v| < {STALL_SPEED_MPS} m/s and Δs < {STALL_PROGRESS_M} m for > {DEADLOCK_HOLD_S} s (red wait excluded)",
+        f"- sampler vs policy: cand_min_offset > {SAMPLER_MIN_OFFSET_M} m → SAMPLER_DEFECT; "
+        f"< {POLICY_CENTER_OFFSET_M} m unused center leaf → POLICY_DEFECT",
         "",
         "## Violations",
         "",
     ]
     for v in diagnosis.violations:
-        lines.append(f"- **{v.kind}** at t={v.t0:.2f}s `{v.metrics}`")
+        lines.append(f"- **{v.kind}** `[{v.cause}]` at t={v.t0:.2f}s `{v.metrics}`")
+    if diagnosis.frame and diagnosis.frame.get("top3"):
+        lines.extend(["", "## Top-3 safe candidates at t0", "", "| id | offset | speed | tag |", "| --- | --- | --- | --- |"])
+        for item in diagnosis.frame["top3"]:
+            lines.append(
+                f"| {item.get('id')} | {item.get('offset')} | {item.get('speed')} | {item.get('tag','')} |"
+            )
+        picked = diagnosis.frame.get("chosen_id")
+        tags = diagnosis.frame.get("chosen_tags")
+        lines.extend(["", f"picked `{picked}` tags `{tags}`", ""])
     lines.extend(["", "## Slice", "", "```", format_report(diagnosis), "```", ""])
     if diagnosis.slice:
         lines.append("| t | offset | speed | steer | id |")
@@ -412,3 +605,24 @@ def format_issue_body(diagnosis: Diagnosis) -> str:
             )
         lines.append("")
     return "\n".join(lines)
+
+
+def cluster_diagnoses(diagnoses: Sequence[Diagnosis]) -> List[Dict[str, Any]]:
+    groups: Dict[tuple, Dict[str, Any]] = {}
+    order: List[tuple] = []
+    for d in diagnoses:
+        acts = [v for v in d.violations if v.actionable]
+        if not acts:
+            continue
+        v = acts[0]
+        key = (d.scenario or "-", v.cause)
+        if key not in groups:
+            groups[key] = {
+                "scenario": d.scenario,
+                "cause": v.cause,
+                "kind": v.kind,
+                "seeds": [],
+            }
+            order.append(key)
+        groups[key]["seeds"].append(d.seed)
+    return [groups[k] for k in order]

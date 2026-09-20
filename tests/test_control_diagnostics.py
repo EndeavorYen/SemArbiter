@@ -23,6 +23,7 @@ from semif_phase1.control_diagnostics import (
     STALL_PROGRESS_M,
     STALL_SPEED_MPS,
     STEER_ZERO_CROSS_HZ,
+    cluster_diagnoses,
     diagnose_trace,
     format_issue_body,
     format_issue_title,
@@ -44,6 +45,7 @@ def _samples(
     chosen_speed=None,
     chosen_id: str = "t00",
     chosen_tags: str = "12.0m/s +0.00 hold clear go",
+    menu=None,
 ):
     out = []
     for i in range(n):
@@ -69,6 +71,7 @@ def _samples(
                 chosen_tags=chosen_tags,
                 signal=sig,
                 chosen_speed=cs,
+                menu=menu,
             )
         )
     return out
@@ -293,3 +296,141 @@ def test_mock_episode_trace_has_required_fields():
     d = diagnose_trace(trace, seed=42, scenario="speed_zone_city", mode="heuristic")
     assert episode["seed"] == 42
     assert d.n_samples == len(trace)
+    assert "cand_min_offset" in trace[0]
+    assert "cand_safe_count" in trace[0]
+    assert "action_switch" in trace[0]
+
+
+def _deadband_offset(t, _i):
+    if t < 0.2:
+        return 0.4
+    if t < 0.4:
+        return 0.02
+    return 0.02 + (t - 0.35) * (DEADBAND_DRIFT_MPS + 0.15)
+
+
+def test_sampler_defect_when_pool_has_no_center_leaf():
+    menu = [
+        {"id": "t00", "speed": 12.0, "offset": 0.40, "collision": False, "tag": "12.0m/s +0.20 diverge clear go"},
+        {"id": "t01", "speed": 12.0, "offset": 0.55, "collision": False, "tag": "12.0m/s +0.30 diverge clear go"},
+    ]
+    trace = _samples(n=80, offset=_deadband_offset, speed=12.0, chosen_id="t00", menu=menu)
+    d = diagnose_trace(trace, seed=42, scenario="speed_zone_city")
+    v = next(v for v in d.violations if v.kind == "deadband")
+    assert v.cause == "SAMPLER_DEFECT"
+    assert v.actionable is True
+    assert d.ok is False
+
+
+def test_policy_defect_when_center_leaf_exists_but_was_not_picked():
+    menu = [
+        {"id": "t00", "speed": 16.0, "offset": 0.40, "collision": False, "tag": "16.0m/s +0.20 diverge clear go"},
+        {"id": "t01", "speed": 12.0, "offset": 0.02, "collision": False, "tag": "12.0m/s -0.02 center clear go"},
+    ]
+    trace = _samples(
+        n=80,
+        offset=_deadband_offset,
+        speed=12.0,
+        chosen_id="t00",
+        chosen_tags="16.0m/s +0.20 diverge clear go",
+        menu=menu,
+    )
+    d = diagnose_trace(trace, seed=42, scenario="speed_zone_city")
+    v = next(v for v in d.violations if v.kind == "deadband")
+    assert v.cause == "POLICY_DEFECT"
+    assert v.actionable is True
+    assert d.frame and len(d.frame["top3"]) <= 3
+
+
+def test_truncated_collision_is_not_ok():
+    trace = _samples(n=20, offset=0.02, speed=14.0, steer=0.0)
+    d = diagnose_trace(trace, seed=1, scenario="pedestrian_jaywalking", collision=True, t_end=1.0)
+    causes = [v.cause for v in d.violations]
+    assert "INVALID_COLLISION_TRUNCATED" in causes
+    assert d.ok is False
+
+
+def test_sensor_anomaly_reverse_is_expected_maneuver():
+    menu = [
+        {"id": "t00", "speed": 0.0, "offset": 0.0, "collision": False, "tag": "0.0m/s +0.00 hold clear halt"},
+        {"id": "t01", "speed": -3.2, "offset": 0.0, "collision": False, "tag": "-3.2m/s +0.00 hold clear go"},
+    ]
+    trace = _samples(
+        n=80,
+        speed=0.0,
+        chosen_speed=lambda t, _i: -3.2 if t >= 2.4 else 8.0,
+        chosen_id="t01",
+        menu=menu,
+    )
+    d = diagnose_trace(trace, seed=42, scenario="sensor_anomaly")
+    c = next(v for v in d.violations if v.kind == "chatter")
+    assert c.cause == "EXPECTED_SCENARIO_MANEUVER"
+    assert c.actionable is False
+    assert d.ok is True
+
+
+def test_issue_body_prints_attribution_and_top3():
+    menu = [
+        {"id": "t00", "speed": 16.0, "offset": 0.40, "collision": False, "tag": "16.0m/s +0.20 diverge clear go"},
+        {"id": "t01", "speed": 12.0, "offset": 0.02, "collision": False, "tag": "12.0m/s -0.02 center clear go"},
+        {"id": "t02", "speed": 10.0, "offset": 0.08, "collision": False, "tag": "10.0m/s +0.05 hold clear go"},
+    ]
+    trace = _samples(n=80, offset=_deadband_offset, speed=12.0, chosen_id="t00", menu=menu)
+    d = diagnose_trace(trace, seed=42, scenario="speed_zone_city", mode="heuristic")
+    text = format_report(d)
+    body = format_issue_body(d)
+    assert "[POLICY_DEFECT]" in text
+    assert "## Attribution" in body
+    assert "POLICY_DEFECT" in body
+    assert "t01" in body
+    assert "Top-3" in body or "top3" in body.lower()
+
+
+def test_file_issue_skips_expected_maneuver():
+    from benchmarks.diagnose_control_quality import file_issue
+
+    menu = [
+        {"id": "t01", "speed": -3.2, "offset": 0.0, "collision": False, "tag": "-3.2m/s +0.00 hold clear go"},
+    ]
+    trace = _samples(
+        n=80,
+        speed=0.0,
+        chosen_speed=lambda t, _i: -3.2 if t >= 2.4 else 8.0,
+        menu=menu,
+    )
+    d = diagnose_trace(trace, seed=42, scenario="sensor_anomaly")
+    out = file_issue(d)
+    assert out["filed"] is False
+    assert out["reason"] == "expected"
+
+
+def test_cluster_merges_same_scenario_and_cause():
+    menu = [
+        {"id": "t00", "speed": 12.0, "offset": 0.40, "collision": False, "tag": "diverge"},
+        {"id": "t01", "speed": 12.0, "offset": 0.02, "collision": False, "tag": "center"},
+    ]
+
+    def one(seed):
+        return diagnose_trace(
+            _samples(n=80, offset=_deadband_offset, speed=12.0, chosen_id="t00", menu=menu),
+            seed=seed,
+            scenario="speed_zone_city",
+        )
+
+    groups = cluster_diagnoses([one(42), one(43), one(44)])
+    assert len(groups) == 1
+    assert groups[0]["cause"] == "POLICY_DEFECT"
+    assert groups[0]["seeds"] == [42, 43, 44]
+
+
+def test_fast_path_uses_ground_truth_obstacles():
+    from benchmarks.benchmark_jevpilot_hierarchical import JevPilot2Simulator
+
+    sim = JevPilot2Simulator("pedestrian_jaywalking", seed=42)
+    sim.use_camera_obstacles = False
+    boxes = sim.ground_truth_obstacles()
+    assert boxes and boxes[0]["kind"] == "pedestrian"
+    assert "rel_z" in boxes[0] and boxes[0]["rel_z"] > 0
+    sim.z = 42.0
+    obs = sim.get_observation()
+    assert any(bool(vec[4]) for vec in obs["candidates"].values())
