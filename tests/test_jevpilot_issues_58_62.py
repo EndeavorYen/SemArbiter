@@ -100,7 +100,8 @@ def test_fsd_overlay_assets_present():
 def test_bundle_hooks_raw_mode_and_sim():
     main = (JEV / "assets" / "main-CvLEeHjW.js").read_text(encoding="utf-8")
     worker = (JEV / "assets" / "planner.worker-DFdG3q6n.js").read_text(encoding="utf-8")
-    assert "window.SEMIF_SIM=Q=new cn(" in main
+    assert "Q=window.SEMIF_SIM=new cn(" in main
+    assert "window.SEMIF_SIM=Q=new cn(" not in main
     assert "var Hh=window.SEMIF_WORLD=new uh(" in main
     assert "rawMode:t.rawMode" in main
     assert "l=!1&&O&&r<8?{x:w.x" in worker
