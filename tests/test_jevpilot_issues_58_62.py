@@ -102,6 +102,9 @@ def test_fsd_overlay_assets_present():
     assert "Raw decision" not in js
     assert "fillJevAnswers" in js
     assert "answers.motion" in js
+    assert "lateral_offset_m" in js
+    assert "player.x" in js
+    assert "_steerEma" not in js
 
 
 def test_bundle_hooks_raw_mode_and_sim():

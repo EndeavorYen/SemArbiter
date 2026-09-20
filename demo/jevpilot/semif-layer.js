@@ -57,6 +57,11 @@
           body.state.seed = window.SEMIF_SIM.world.seed;
           body.state.raw_mode = !!window.SEMIF_RAW_MODE;
         }
+        const player = window.SEMIF_SIM && window.SEMIF_SIM.player;
+        if (player && typeof player.x === "number") {
+          body.state = body.state || {};
+          body.state.lateral_offset_m = player.x;
+        }
         if (window.SEMIF_VISION) {
           body.state = body.state || {};
           body.state.vision = window.SEMIF_VISION;
@@ -301,15 +306,6 @@
             injectFrustumEvents(sim, Math.min(dt || 0.016, 0.05));
           } catch (_err) {
             /* HUD ghosts must not kill the drive loop */
-          }
-          try {
-            const p = sim.player;
-            if (p && typeof p.steer === "number") {
-              sim._steerEma = sim._steerEma == null ? p.steer : 0.65 * sim._steerEma + 0.35 * p.steer;
-              p.steer = sim._steerEma;
-            }
-          } catch (_err) {
-            /* EMA must not kill the drive loop */
           }
           return out;
         };
