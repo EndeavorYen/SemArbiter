@@ -5,6 +5,7 @@ from semif_phase1.lateral import (
     LATERAL_KD,
     LATERAL_KP,
     LATERAL_PD_LIMIT,
+    lane_keep_maneuver,
     lane_keep_pursuit_offset,
     lateral_pd,
 )
@@ -26,18 +27,31 @@ def test_pd_does_not_replace_a_detour_steer():
     assert abs(u - 0.45) < 1e-9
 
 
-def test_lane_keep_pursuit_zeros_the_065_sample_band():
-    """Web sampler second band is ±0.65 m. Holding that offset is the weave."""
-    assert LANE_KEEP_OFFSET_M >= 0.65
+def test_lane_keep_pursuit_zeros_all_web_sample_bands():
+    """Web bands are ±0.1 / ±0.65 / ±1.35 m. Any of those held by A() weaves."""
+    assert LANE_KEEP_OFFSET_M >= 1.35
     assert lane_keep_pursuit_offset(0.1) == 0.0
     assert lane_keep_pursuit_offset(-0.65) == 0.0
-    assert lane_keep_pursuit_offset(0.65) == 0.0
+    assert lane_keep_pursuit_offset(1.35) == 0.0
+    assert lane_keep_pursuit_offset(-1.35) == 0.0
 
 
-def test_lane_keep_pursuit_keeps_a_real_nudge():
-    assert lane_keep_pursuit_offset(1.35) == 1.35
-    assert lane_keep_pursuit_offset(-1.2) == -1.2
+def test_lane_keep_pursuit_keeps_an_oversized_pullout():
+    assert lane_keep_pursuit_offset(2.0) == 2.0
+    assert lane_keep_pursuit_offset(-2.0) == -2.0
     assert lane_keep_pursuit_offset(None) is None
+
+
+def test_lane_keep_maneuver_converts_steer_only_to_centerline():
+    """t>=44 samples have null offset and fall back to discrete steer. That hunts."""
+    m = lane_keep_maneuver(None, 16.0)
+    assert m["lane_offset_m"] == 0.0
+    assert 6.0 <= m["lookahead_m"] <= 10.0
+    held = lane_keep_maneuver(1.35, 12.0)
+    assert held["lane_offset_m"] == 0.0
+    pull = lane_keep_maneuver(2.0, 12.0)
+    assert pull["lane_offset_m"] == 2.0
+    assert pull["lookahead_m"] is None
 
 
 def test_open_loop_microsteer_exceeds_15cm():
@@ -101,7 +115,7 @@ def _web_pursuit_peak(*, use_center_ref: bool, seed: int) -> float:
     peak = abs(e)
     while z < 200.0:
         if t >= next_dec:
-            target = 0.55 if rng.random() < 0.55 else -0.45
+            target = 1.35 if rng.random() < 0.55 else -1.2
             if use_center_ref:
                 target = lane_keep_pursuit_offset(target)
             next_dec = t + 0.1
@@ -117,7 +131,9 @@ def test_overlay_applies_pd_not_steer_ema():
     assert "applyLateralPd" in js
     assert "LANE_KEEP_OFFSET_M" in js
     assert str(LANE_KEEP_OFFSET_M) in js
-    assert "lane_keep_pursuit_offset" in js or "src.lane_offset_m = 0" in js
+    assert "laneKeepManeuver" in js
+    assert "lookahead_m" in js
+    assert "src.lane_offset_m = 0" in js
     assert "LATERAL_KP" in js
     assert str(LATERAL_KP) in js
     assert str(LATERAL_KD) in js

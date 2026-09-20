@@ -91,7 +91,7 @@
   const LATERAL_KD = 0.15;
   const LATERAL_PD_LIMIT = 0.12;
   const DETOUR_STEER = 0.28;
-  const LANE_KEEP_OFFSET_M = 0.7;
+  const LANE_KEEP_OFFSET_M = 1.4;
 
   function lateralPd(uSelected, offsetM, offsetDot) {
     const u = Number(uSelected) || 0;
@@ -108,6 +108,16 @@
     if (selectedOffset == null || !Number.isFinite(selectedOffset)) return selectedOffset;
     if (Math.abs(selectedOffset) <= LANE_KEEP_OFFSET_M) return 0;
     return selectedOffset;
+  }
+
+  function laneKeepManeuver(selectedOffset, speed) {
+    const keep =
+      selectedOffset == null ||
+      !Number.isFinite(selectedOffset) ||
+      Math.abs(selectedOffset) <= LANE_KEEP_OFFSET_M;
+    if (!keep) return { lane_offset_m: selectedOffset, lookahead_m: null };
+    const look = Math.max(6, Math.min(10, 4.5 + 0.36 * Math.abs(Number(speed) || 0)));
+    return { lane_offset_m: 0, lookahead_m: look };
   }
 
   function laneOffsetM(sim) {
@@ -129,9 +139,14 @@
       src._pdSelSteer = Number.isFinite(src.steering) ? src.steering : Number(p.steering) || 0;
       src._pdSelOff = Number.isFinite(src.lane_offset_m) ? src.lane_offset_m : null;
     }
-    if (src && src._pdSelOff != null) {
-      src.lane_offset_m = laneKeepPursuitOffset(src._pdSelOff);
-      if (src.lane_offset_m === 0) src.lane_offset_m = 0;
+    if (src) {
+      const keep = laneKeepManeuver(src._pdSelOff, p.speed);
+      if (keep.lookahead_m != null) {
+        src.lane_offset_m = 0;
+        src.lookahead_m = keep.lookahead_m;
+        return;
+      }
+      src.lane_offset_m = keep.lane_offset_m;
       return;
     }
     const measured = laneOffsetM(sim);

@@ -9,7 +9,7 @@ LATERAL_KD = 0.15  # rad per m/s of offset rate
 LATERAL_PD_LIMIT = 0.12  # max |correction| so a detour still wins
 DETOUR_STEER = 0.28  # skip PD when the selected steer is already a lane change
 # Web sampler: t<14 ±0.1 m, t<30 ±0.65 m, else ±1.35 m. A() holds that offset.
-LANE_KEEP_OFFSET_M = 0.7
+LANE_KEEP_OFFSET_M = 1.4
 
 
 def lane_keep_pursuit_offset(selected_offset_m):
@@ -20,6 +20,18 @@ def lane_keep_pursuit_offset(selected_offset_m):
     if abs(offset) <= LANE_KEEP_OFFSET_M:
         return 0.0
     return offset
+
+
+def lane_keep_maneuver(selected_offset_m, speed_mps: float) -> dict:
+    """Centerline pursuit for lane-keep, including Web steer-only (null offset) leaves.
+
+    Lookahead is frozen vs speed so A() does not jump 4–10 m every decision.
+    """
+    keep = selected_offset_m is None or abs(float(selected_offset_m)) <= LANE_KEEP_OFFSET_M
+    if not keep:
+        return {"lane_offset_m": float(selected_offset_m), "lookahead_m": None}
+    look = max(6.0, min(10.0, 4.5 + 0.36 * abs(float(speed_mps))))
+    return {"lane_offset_m": 0.0, "lookahead_m": look}
 
 
 def lateral_pd(
