@@ -302,6 +302,15 @@
           } catch (_err) {
             /* HUD ghosts must not kill the drive loop */
           }
+          try {
+            const p = sim.player;
+            if (p && typeof p.steer === "number") {
+              sim._steerEma = sim._steerEma == null ? p.steer : 0.65 * sim._steerEma + 0.35 * p.steer;
+              p.steer = sim._steerEma;
+            }
+          } catch (_err) {
+            /* EMA must not kill the drive loop */
+          }
           return out;
         };
       }

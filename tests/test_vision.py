@@ -34,7 +34,7 @@ def test_compact_state_keeps_vision_not_pixels():
     assert "candidates" not in packed
     assert "image" not in packed
     assert packed["vision"]["signal"] == "red"
-    assert "prepare to stop" in packed["vision"]["event"]
+    assert "mandatory stop" in packed["vision"]["event"]
     assert "red" not in packed["vision"]
     assert "backend" not in packed["vision"]
 
@@ -84,7 +84,7 @@ def test_camera_event_uses_score_delta_not_world_ttc():
     )
     assert "vehicle visible" in stable
     red = camera_event({"signal": "red", "red": 0.9, "vehicle": 0.0})
-    assert "red" in red
+    assert "RED" in red or "red" in red.lower()
     assert "maintain lane" in camera_event({})
 
 

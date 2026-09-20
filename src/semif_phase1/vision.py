@@ -132,7 +132,7 @@ def frame_motion(
 def event_from_motion(motion: list[Dict[str, Any]], signal: str = "unknown") -> str:
     clauses: list[str] = []
     if signal == "red" or any(m["kind"] == "light_red" for m in motion):
-        clauses.append("traffic light is red ahead, prepare to stop")
+        clauses.append("RED signal ahead, mandatory stop")
     elif signal == "green" or any(m["kind"] == "light_green" for m in motion):
         clauses.append("traffic light is green")
     for item in motion:
@@ -165,7 +165,7 @@ def camera_event(curr: Dict[str, Any], prev: Optional[Dict[str, Any]] = None) ->
     clauses: list[str] = []
     signal = str(curr.get("signal") or "unknown")
     if signal == "red":
-        clauses.append("traffic light is red ahead, prepare to stop")
+        clauses.append("RED signal ahead, mandatory stop")
     elif signal == "green":
         clauses.append("traffic light is green")
 

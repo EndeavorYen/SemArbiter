@@ -956,11 +956,22 @@ class DecisionEngine:
             else:
                 use_prior = self._prior_for(len(options))
                 final_instructions = instructions
+                ego_x = None
+                try:
+                    if state.get("lateral_offset_m") is not None:
+                        ego_x = float(state.get("lateral_offset_m"))
+                except (TypeError, ValueError):
+                    ego_x = None
+                vis = state.get("vision") if isinstance(state.get("vision"), dict) else {}
+                inter = state.get("intersection") if isinstance(state.get("intersection"), dict) else {}
+                sig = str(vis.get("signal") or inter.get("signal") or "").lower() or None
+                if sig != "red" and "red" in str(vis.get("event") or "").lower():
+                    sig = "red"
                 final_options = []
                 for opt in options:
                     cand_vec = candidates.get(opt["id"]) if isinstance(candidates, dict) else None
                     if cand_vec and len(cand_vec) >= 6:
-                        desc = vector_option_tag(cand_vec)
+                        desc = vector_option_tag(cand_vec, ego_x=ego_x, signal=sig)
                     else:
                         desc = opt["description"]
                     final_options.append({"id": opt["id"], "description": desc})

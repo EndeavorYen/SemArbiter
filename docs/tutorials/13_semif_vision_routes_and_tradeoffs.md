@@ -47,68 +47,144 @@
 4. **目標門檻（Target Bar）說明**：  
    目前唯一通過 75% 乾淨完成率的只有「純遙測」基線。因此，**$\ge 75\%$ 是任何視覺方案必須超越的驗收門檻，而非路線一現已達成的既有成績**。當前文字視覺為 70%，仍處於待優化超越的狀態。
 
+### 3. 最新實測突破：相機幀時序事件（Phase 5 Temporal Events）
+
+針對靜態裸浮點數（`vehicle: 0.8`）導致完成率暴跌至 60% 的問題，我們進一步實作了「純相機幀時序差分（Frame-to-Frame Temporal Events）」，實測數據記錄於 `results/phase5-jevpilot-vision-frame-event-cuda.json`：
+
+| 評測模式 | 視覺機制 | 乾淨完成率 (Clean Rate) | 決策延遲 (P50) | 加塞避讓 (Cut-in) | 備註 |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Flat SemIf** | **無視覺 (純遙測)** | **75.0% (15/20)** | **49.4 ms** | 1/2 通過 | 基準基線 (512 桶) |
+| **Flat SemIf** | **CLIP 裸短分數** | **60.0% (12/20)** | **85.6 ms** | **0/2 全撞** | 靜態無量綱分數使車速飆至 17m/s 煞不住 |
+| **Flat SemIf** | **相機幀時序動態謂語** | **75.0% (15/20)** | **51.6 ms** | **2/2 乾淨通過** | **重回 512 桶！加塞全救回，追平純遙測** |
+| **Heuristic** | 任一配置 | 65.0% (13/20) | < 0.1 ms | 0/2 全撞 | 規則幾何基線 (不看相機) |
+
+**突破性洞察**：
+1. **動態謂語勝過靜態標籤**：人類駕駛依賴大腦背側通路（Dorsal Stream）感知光流擴張率與相對運動向量。純比對相鄰幀像素色塊變化（變大 $\to$ 逼近、橫移 $\to$ 切入、出現 $\to$ 新障礙物），使 LLM 瞬間理解動態因果，加塞切入從 0/2 逆轉為 2/2 全過。
+2. **語意精煉重啟 512 桶**：單句精準事件（`"cutting toward frame center"`）將 Token 數控制在 512-bucket 內，延遲立即從 85.6 ms 壓回 51.6 ms（享受完整 CUDA Graph 靜態加速）。
+
 ---
 
-## 二、三大多模態路線架構對比
+## 二、進階架構：雙 Jev 快慢迴圈與無上帝視角純視覺閉環
 
-針對視覺在 JevPilot 系統中的角色，我們系統化評估以下三種技術路線：
+為徹底解決交通法規遵從性（紅燈煞停）與車道置中蛇行晃動，SemIf 架構進一步演進為**雙 Jev 階層式包容架構（Subsumption Architecture）**，並全面斷開模擬器後門。
 
 ```mermaid
 flowchart TD
-    subgraph Route1["路線一：雙率語意可供性解耦（推薦）"]
-        style Route1 fill:#e8f5e9,stroke:#2e7d32
-        Cam1["相機 JPEG (10-20Hz)"] --> Enc1["SigLIP / 輕量 Zero-Shot"]
-        Enc1 --> Struct1["結構化 state.vision<br/>(signal, red, ped_prob)"]
-        Struct1 --> TextPrompt1["純文字 Prompt + Candidates"]
-        TextPrompt1 --> Sliced1["Sliced LM Head (50Hz)<br/>【CUDA Graph 靜態捕獲】"]
-        Sliced1 --> Choice1["本幀最優軌跡 tXX"]
+    subgraph Perception["純視覺相機感知 (無上帝視角)"]
+        CamFrame["相機前後幀 (10-20Hz)"] --> IPM["地平面逆透視 (IPM) 接地點投影"]
+        IPM --> CamObs["相機相對障礙物 camera_obstacles<br/>(rel_x, rel_z)"]
+        CamFrame --> TempDelta["像素時序動態事件 (切入 / 逼近)"]
     end
 
-    subgraph Route2["路線二：原生預對齊小參 VLM"]
-        style Route2 fill:#fff3e0,stroke:#e65100
-        Cam2["相機 JPEG (10-15Hz)"] --> VLM2["SmolVLM-500M / Qwen2-VL-2B<br/>【官方預對齊權重】"]
-        TextPrompt2["任務 Prompt + Candidates"] --> VLM2
-        VLM2 --> Sliced2["Sliced Head 讀出 (Last Token)"]
-        Sliced2 --> Choice2["本幀最優軌跡 tXX"]
+    subgraph SlowLoop["慢迴圈 Jev 1（大腦策略層 · 2~5 Hz）"]
+        TempDelta --> Jev1["Jev 1：法規與策略方針仲裁"]
+        Jev1 --> Directive["高階策略方針 Directive<br/>(如 'RED_LIGHT_STOP' / 'YIELD_CUT_IN')"]
     end
 
-    subgraph Route3["路線三：微調專用 Projector"]
-        style Route3 fill:#ede7f6,stroke:#4a148c
-        Cam3["相機 JPEG"] --> Enc3["SigLIP 凍結骨幹"]
-        Enc3 --> Proj3["微調訓練 Projector / Q-Former"]
-        Proj3 --> LLM3["凍結 Qwen2.5-3B 隱層前綴"]
-        TextPrompt3["文字 Prompt + Candidates"] --> LLM3
-        LLM3 --> Sliced3["Sliced Head 讀出"]
-        Sliced3 --> Choice3["本幀最優軌跡 tXX"]
+    subgraph FastLoop["快迴圈 Jev 2（小腦運動神經 · 20~50 Hz）"]
+        CamObs --> SamplerRollout["採樣器 1.5 秒運動學模擬<br/>(以相機障礙物檢驗 collision)"]
+        SamplerRollout --> Cands16["16 條幾何軌跡 (含 centering 置中標籤)"]
+        Directive -.-> ContextPrompt["Prompt 先驗與任務條件"]
+        ContextPrompt --> Jev2["Jev 2：Sliced LM Head 物理仲裁"]
+        Cands16 --> Jev2
+        Jev2 --> ExecID["唯一執行軌跡 tXX (512 桶 CUDA Graph)"]
     end
 ```
 
-### 三條路線的工程特性矩陣
+### 1. 快慢雙 Jev 的防衝突鐵律（Strategic-Tactical Split）
+- **大腦管方針，小腦動手腳**：慢迴圈 Jev 1 負責法規與情境模式仲裁（如輸出 `"intent": "RED_LIGHT_STOP"`），**嚴禁**直接輸出轉角或軌跡 ID；快迴圈 Jev 2 是全系統**唯一的物理執行者**。
+- **物理安全硬約束優先（Fail-safe Override）**：若慢迴圈給出巡航方針，但快迴圈在 50ms 內檢測到眼前突發障礙物（`collision=yes`），快迴圈具備最高否決權，強制執行緊急煞停。兩者上下級分工明確，絕不衝突。
+
+### 2. 純相機逆透視（IPM）碰撞檢測：斷開模擬器後門
+目前閉環在採樣器判斷 `_hits_obstacle` 時曾讀取了模擬器的世界座標。真實無上帝視角方案採用**地平面逆透視幾何（Inverse Perspective Mapping）**：
+- 依靠固定相機安裝高度 $H$ 與俯仰角 $\theta$，檢測障礙物在畫面的**接地點像素 $(u, v)$**。
+- 直接推導出障礙物相對車頭位置：
+  $$\text{rel\_z} = \frac{H}{\tan(\theta + \Delta v)}, \quad \text{rel\_x} = \text{rel\_z} \cdot \frac{\Delta u}{f}$$
+- 採樣器拿相機估出的 `camera_obstacles` 進行 1.5 秒軌跡幾何碰撞檢驗。若前方被死角遮擋相機未檢出，採樣器即不標註碰撞——達成 100% 誠實的具身智能（Embodied AI）。
+
+### 3. 車道置中擺動修復（Lane Centering & Anti-Oscillation）
+針對 Web 模擬中左右蛇行晃動（Issue #101）：
+- **位置知情**：在 `compact_jev_state` 補回自車橫向偏移語意（`lane_offset: "drifted 0.4m right"` 或 `"centered"`），終結模型位置全盲。
+- **回正引力**：在 `vector_option_tag` 恢復 `route_error` 語意標籤（`steer -0.15 (centering)` vs `steer +0.25 (diverging)`），激發 LLM 向心置中本能。
+- **執行濾波**：在底層控制層增加輕量 EMA 轉向角平滑，消除離散軌跡切換抖動。
+
+---
+
+## 三、端到端語意轉譯機制（Semantic Translation Pipeline）
+
+深入理解 JevPilot 的核心，在於看清系統如何將連續的高維物理世界（像素與軌跡）轉譯為離散的符號型別契約：
+
+### 1. 相機畫面轉語意（Input Frame to Semantics）
+```mermaid
+flowchart LR
+    Frame["相機 JPEG 影像"] --> ZeroShot["SigLIP 靜態餘弦相似度"]
+    ZeroShot --> Probs["短置信度標量 (red: 0.82)"]
+    
+    Frame --> TempDiff["相鄰幀像素尺度差分"]
+    TempDiff --> TauCalc["Tau 理論光流膨脹率<br/>(τ = w / ẇ)"]
+    TauCalc --> EventStr["動態時序謂語<br/>('cutting toward frame center')"]
+    
+    Probs --> Compact["compact_jev_state 結構化打包"]
+    EventStr --> Compact
+    Compact --> Prompt["LLM Prompt"]
+```
+
+- **靜態 Zero-Shot 匹配（`src/semif_phase1/vision.py`）**：  
+  預設定義參考 Prompt（如 `"a red traffic light facing the camera"`）。編碼器提取影像特徵與文本特徵做 Cosine Similarity 投影，輸出 0~1 的機率字典。
+- **動態時序差分與 Tau 理論（$\tau = w / \dot{w}$）**：  
+  源於生物視覺認知（David Lee, 1976），老鷹捕食與人類接球時大腦並不量測絕對公尺數，而是監控視網膜物體**像素寬度的擴張速率（Rate of Optical Expansion）**：
+  $$\text{TTC} \approx \frac{w}{\dot{w}} = \frac{\text{當前物體像素寬度}}{\text{每一幀像素膨脹變大的速度}}$$
+  - 像素色塊快速變大 $\implies$ 物體正高速靠近（`growing in camera`）。
+  - 像素中心橫向平移 $\implies$ 側向切入加塞（`cutting toward frame center`）。
+  - 幀差突增 $\implies$ 突發新障礙物（`appeared in frame`）。
+
+### 2. 幾何軌跡轉語意（Trajectory to Semantics）
+```mermaid
+flowchart LR
+    Sample["採樣 16 組 (目標速度, 轉向角)"] --> Rollout["點質量運動學模擬 1.5 秒 (31步)"]
+    Rollout --> Vec6["6 維物理數值向量 vec<br/>[v, steer, route_err, offroad, hit, halt]"]
+    Vec6 --> TagFmt["vector_option_tag 自然語言模板"]
+    TagFmt --> OptList["Prompt options<br/>('12.0m/s steer +0.00 collision=no...')"]
+    OptList --> SlicedLM["最後一個 Token Sliced Head 裁決"]
+```
+
+- **前向運動學積分（Rollout）**：採樣器以當前車速為基準，採樣 16 組（目標速度, 目標轉角），以點質量物理模型向未來積分 1.5 秒（31 步，每步 0.05 秒）。
+- **6 維物理指標提取**：計算每條軌跡結束時的狀態：  
+  `vec = [speed, steer, route_error, offroad, collision, stop_at_line]`
+- **自然語言標籤轉譯（`vector_option_tag`）**：  
+  將數值填入模板：
+  ```python
+  f"{speed:.1f}m/s steer {steer:+.2f} collision={'yes' if hit else 'no'} halt={'yes' if halt else 'no'}"
+  ```
+  生成選項（`t00: "12.0m/s steer +0.00 collision=no halt=no"`）。
+- **切片讀出（Sliced LM Head）**：LLM 在最後一個 Token 只針對 `t00 ~ t15` 的字元切片投影，進行 Argmax 物理裁決。
+
+### 3. 交通法規與紅燈違規真相：詞彙脫鉤（Vocabulary Misalignment）
+模型在預訓練階段早已學會紅燈停、綠燈行，但先前為何在閉環中連續闖紅燈？
+- **指令過於寬鬆**：任務指令為 `VECTOR_INSTRUCTIONS = "Choose a safe driving path."`，僅要求安全，未提及法規遵守。
+- **標籤自相矛盾**：路口無橫向來車時，幾何採樣器將 12m/s 直行軌跡標註為 `collision=no`。LLM 看到兩條軌跡都不會撞車（`collision=no`），自然優先選擇具備前進效率的動作，不知道該動作在法律上是違規闖紅燈。
+- **解法：語意對齊（Vocabulary Alignment）**：  
+  不需要開發繁複的外掛規則引擎。只需將視覺事件宣告為強約束（`"traffic_light": "RED signal ahead, mandatory stop required"`），並在選項標籤中將紅燈下的非煞停軌標註為違法（如 `violates_signal=yes`），LLM 原生的常識道德便會精確命中 `halt=yes`。
+
+---
+
+## 四、三大多模態路線架構對比
+
+針對視覺在 JevPilot 系統中的角色，我們系統化評估以下三種技術路線：
 
 | 比較維度 | 路線一：雙率語意可供性解耦（推薦） | 路線二：原生預對齊小參 VLM | 路線三：微調專用 Projector |
 | :--- | :--- | :--- | :--- |
-| **視覺特徵載體** | 標籤置信度標量（`state.vision`） | 密集影像 Tokens（256–1024 tokens） | 壓縮 Patch Tokens（32–64 tokens） |
+| **視覺特徵載體** | 幀時序動態事件＋IPM 接地點障礙物 | 密集影像 Tokens（256–1024 tokens） | 壓縮 Patch Tokens（32–64 tokens） |
 | **模型訓練門檻** | **完全零訓練（Zero-shot）** | **完全零訓練（直接使用開源權重）** | 需收集數萬幀軌跡配對微調 |
-| **推論延遲** | **極致低（決策迴圈 < 8 ms）** | 高（35 ~ 70 ms） | 中等（15 ~ 25 ms，難以圖捕獲） |
-| **CUDA Graph 相容** | **完全相容（固定 512 桶）** | 困難（需固定分辨率與複雜 Padding） | 困難（前綴破壞靜態拓撲） |
-| **物理完成率預期** | **目標 $\ge 75\%$**（現 CLIP 文字證據 70%，尚未達標） | 需調試提示詞對物理候選的敏感度 | 初期波動大，容易過擬合訓練場景 |
-| **可解釋性** | **極高（HUD 數值即時可見）** | 黑盒（隱層特徵傳播） | 黑盒（未對齊隱層投影） |
+| **推論延遲** | **極致低（決策迴圈 ~50 ms，512 桶）** | 高（35 ~ 70 ms） | 中等（15 ~ 25 ms，難以圖捕獲） |
+| **CUDA Graph 相容** | **完全相容（穩健維持 512 桶）** | 困難（需固定分辨率與複雜 Padding） | 困難（前綴破壞靜態拓撲） |
+| **物理完成率實測** | **75%（追平遙測，加塞 2/2 全過）** | 待測（提示詞對物理候選敏感度高） | 初期波動大，容易過擬合訓練場景 |
+| **可解釋性** | **極高（事件句與 HUD 數值即時可見）** | 黑盒（隱層特徵傳播） | 黑盒（未對齊隱層投影） |
 | **邊緣硬體需求** | 單卡 RTX 4060 / 5080 輕鬆承載 | 顯存需求較大（VLM ViT 顯存佔用高） | 需額外訓練管線與資料存儲 |
 
 ---
 
-## 三、為什麼推薦「雙率語意可供性解耦」為最優路線？
-
-1. **符合具身控制的生理學雙系統本質**  
-   人類駕駛的大腦並非每 20 毫秒將視網膜原始像素全量重算一遍邏輯注意力。視覺皮層以較低頻率抽象出「紅燈」、「右側行人正在走動」的高階概念符號；小腦與運動皮層則以高頻（50–100 Hz）根據這些符號與肌肉本體感覺（速度、轉向）平滑微調方向盤。
-2. **守住 SemIf 核心優勢：純文字 Sliced Head 與極致低延遲**  
-   SemIf 的精髓在於利用 Transformer 豐富的常識先驗，在極短的時間內（< 15ms）對當前幀生成的動態幾何候選做型別約束裁決。一旦引入未對齊的像素 token，系統就失去了這項確定性優勢。
-3. **零訓練工程成本，即時可驗收**  
-   編碼器仍做零樣本匹配；寫進 letter-slot 的是一句 `vision.event`（例如 vehicle evidence rising / red light ahead），不是無量綱裸浮點。教程 11 已量過：csv 數字會崩、words/verbose 才站得住。TTC 若沒有相機 bbox，不准用世界座標假裝算出來。
-
----
-
-## 四、實施規範與評測誠實性禁則
+## 五、實施規範與評測誠實性禁則
 
 在推進 SemIf-Vision 的過程中，必須恪守 [AGENTS.md](../../AGENTS.md) 的評測誠實性約束：
 
