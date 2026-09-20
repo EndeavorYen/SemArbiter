@@ -17,6 +17,14 @@ def test_vector_option_tag_is_short():
     assert csv == "16.2,-0.14,0.00,0,1"
     words = vector_option_tag([16.2, -0.14, 0.3, 0.0, False, True], style="words")
     assert "collision=no" in words and "halt=yes" in words
+    centering = vector_option_tag([12.0, -0.15, 0.05, 0.0, False, False], style="words", ego_x=0.6)
+    assert "centering" in centering
+    diverging = vector_option_tag([12.0, 0.25, 0.8, 0.0, False, False], style="words", ego_x=0.2)
+    assert "diverging" in diverging
+    run_red = vector_option_tag([12.0, 0.0, 0.0, 0.0, False, False], style="words", signal="red")
+    assert "violates_signal=yes" in run_red
+    halt_red = vector_option_tag([0.0, 0.0, 0.0, 0.0, False, True], style="words", signal="red")
+    assert "violates_signal" not in halt_red
     verbose = vector_option_tag([16.2, -0.14, 0.3, 0.0, False, True], style="verbose")
     assert "stop_at_line True" in verbose
 
@@ -35,6 +43,12 @@ def test_compact_state_drops_candidates():
     assert "candidate_meta" not in packed
     assert packed["speed_mps"] == 16.0
     assert packed["intersection"]["signal"] == "red"
+
+
+def test_compact_state_adds_lane_offset_phrase():
+    packed = compact_jev_state({"speed_mps": 10.0, "lateral_offset_m": 0.4})
+    assert packed["lane_offset"] == "drifted 0.4m right"
+    assert compact_jev_state({"lateral_offset_m": 0.0})["lane_offset"] == "centered"
 
 
 def test_option_contract_has_no_signal_and_no_stop_coaching():
@@ -65,6 +79,13 @@ def test_sampler_ignores_signal_semantics():
     green = sample_trajectories(ego_x=0.0, ego_z=10.0, speed=16.0, stop_line_z=55.0, seed=7)
     assert [s.stop_at_line for s in red.values()] == [s.stop_at_line for s in green.values()]
     assert any(s.stop_at_line or s.end_speed < 1.2 for s in red.values())
+
+
+def test_sampler_includes_reverse_when_slow():
+    slow = sample_trajectories(ego_x=0.0, ego_z=10.0, speed=1.0, seed=3)
+    assert any(s.speed < 0 for s in slow.values())
+    fast = sample_trajectories(ego_x=0.0, ego_z=10.0, speed=16.0, seed=3)
+    assert all(s.speed >= 0 for s in fast.values())
 
 
 def test_planner_policy_steer_horizon_and_ceiling():

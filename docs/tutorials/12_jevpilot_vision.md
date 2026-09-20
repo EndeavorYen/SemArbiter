@@ -28,7 +28,9 @@ python benchmarks/benchmark_jevpilot_vision.py --episodes 2 --seed 42 \
   --output results/phase5-jevpilot-vision-cuda.json
 ```
 
-第一次真實視覺會下載 CLIP ViT-B/32。換成 SigLIP：`SEMIF_VISION_MODEL=google/siglip-base-patch16-224`。
+第一次真實視覺會下載 **SigLIP** `google/siglip-base-patch16-224`（#48）。視覺主要角色為**慢迴圈可供性提取**：編碼器將路況提煉為 `red/pedestrian` 等短分數，注入 `state.vision` 與 HUD，快迴圈維持純文字 Sliced Head + 512 桶 CUDA Graph 進行動態選軌。
+
+實驗性 Patch 前綴（不作預設）：`SEMIF_VISION_PREFIX=1`。未訓練投影，會關 CUDA Graph。尚未 CUDA 閉環（詳見 [教程 13](13_semif_vision_routes_and_tradeoffs.md)）。`compact_jev_state` 不放 `backend` / `prefix_tokens`，避免撐破 512 桶。
 
 ---
 
@@ -36,17 +38,18 @@ python benchmarks/benchmark_jevpilot_vision.py --episodes 2 --seed 42 \
 
 ```mermaid
 flowchart LR
-    Canvas["3D canvas JPEG"] --> Vision["/v1/vision CLIP"]
-    Vision --> Evidence["state.vision"]
+    Canvas["3D canvas JPEG"] --> Vision["/v1/vision SigLIP (慢迴圈 10-20Hz)"]
+    Vision --> Evidence["state.vision.event (一句相機事件)"]
     Sampler["幾何採樣器 tXX"] --> Cands["candidates"]
-    Evidence --> SemIf
-    Cands --> SemIf["classify_jev Flat"]
-    SemIf --> Pick["selected id"]
+    Evidence --> State["compact_jev_state"]
+    State --> SemIf["SemIf Sliced Head (快迴圈 50Hz)<br/>512 桶 CUDA Graph"]
+    Cands --> SemIf
+    SemIf --> Pick["選中軌跡 ID"]
 ```
 
-像素不進 letter-slot prompt。`compact_jev_state` 只留 `vision.signal / red / pedestrian / …`。
+像素不直接作為未訓練 token 注入決策迴圈。`compact_jev_state` 只留 `vision.event` 與 `signal`。事件來自**相鄰兩張圖的像素框**（變大＝靠近、橫移向中心＝切入、上一幀沒有＝出現），不讀世界座標，不把示意幀尺度寫成「TTC 2.0s」。沒有框時才退回 CLIP 分數差。1024 桶可接受。
 
-閉環沒有 3D 相機。官方 CUDA 成績用 **CLIP 看 PIL 畫的前方示意幀**（紅燈畫紅圓、行人畫人影），`vision_mode=clip`。若 CLIP 載入失敗直接中止，不准退回合成標籤。
+閉環沒有 3D 相機。官方 CUDA 成績用 **編碼器看 PIL 示意幀**，`vision_mode=clip`（名稱沿用；backend 可能是 SigLIP）。載入失敗直接中止，不准退回合成標籤。
 
 `vision_mode=synthetic` 只給 pytest／`--mock`，不得當 CLIP 準確率。
 

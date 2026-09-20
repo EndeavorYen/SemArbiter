@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -26,12 +27,14 @@ def main() -> None:
     args = parser.parse_args()
 
     engine = DecisionEngine(use_mock=args.mock, device=None if args.mock else "cuda")
+    vision_backend = "synthetic" if args.mock else "unknown"
     if not args.mock:
         from semif_phase1.vision import get_vision_encoder
 
         enc = get_vision_encoder()
         if enc.backend == "stub":
-            raise SystemExit("CLIP required for official vision scores (got stub)")
+            raise SystemExit("vision encoder required for official scores (got stub)")
+        vision_backend = enc.backend
     arms = {}
     vision_arm = "synthetic" if args.mock else "clip"
     for vision_mode in ("off", vision_arm):
@@ -59,6 +62,8 @@ def main() -> None:
         "mock": args.mock,
         "model": engine.model_name if not args.mock else "MockDecisionEngine",
         "device": engine.device,
+        "vision_backend": vision_backend,
+        "visual_prefix": os.environ.get("SEMIF_VISION_PREFIX", "0"),
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "arms": arms,
     }

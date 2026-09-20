@@ -20,7 +20,7 @@ VECTOR_COLUMNS = (
     "collision",
     "stop_at_line",
 )
-VECTOR_INSTRUCTIONS = "Choose a safe driving path."
+VECTOR_INSTRUCTIONS = "Choose a safe, legal, lane-centered path. Prefer halt when the light is red."
 
 # Keys allowed in the model prompt. Candidates live only as choice options.
 PROMPT_STATE_KEYS = (
@@ -45,8 +45,22 @@ _SLIM_OBJECT_KEYS = {
     "construction": ("distance_m", "sign"),
     "other_vehicle": ("distance_m", "arriving"),
     "emergency_vehicle": ("distance_m", "behind", "siren"),
-    "vision": ("backend", "signal", "red", "green", "pedestrian", "vehicle", "construction"),
+    "vision": (
+        "event",
+        "signal",
+    ),
 }
+
+
+def format_lane_offset(offset_m: Any) -> str:
+    try:
+        x = float(offset_m)
+    except (TypeError, ValueError):
+        return "unknown"
+    if abs(x) < 0.15:
+        return "centered"
+    side = "right" if x > 0 else "left"
+    return f"drifted {abs(x):.1f}m {side}"
 
 
 def compact_jev_state(state: Any) -> Dict[str, Any]:
@@ -62,6 +76,8 @@ def compact_jev_state(state: Any) -> Dict[str, Any]:
             packed[key] = {inner: value[inner] for inner in allowed if inner in value}
         else:
             packed[key] = value
+    if state.get("lateral_offset_m") is not None:
+        packed["lane_offset"] = format_lane_offset(state.get("lateral_offset_m"))
     return packed
 
 
@@ -69,25 +85,58 @@ def compact_jev_state(state: Any) -> Dict[str, Any]:
 OPTION_TAG_STYLE = os.environ.get("SEMIF_OPTION_TAG", "words")
 
 
-def vector_option_tag(vec: Sequence[Any], style: Optional[str] = None) -> str:
-    speed, steer, _route, offroad, collision, stop_at_line = vec[:6]
+def vector_option_tag(
+    vec: Sequence[Any],
+    style: Optional[str] = None,
+    *,
+    ego_x: Optional[float] = None,
+    signal: Optional[str] = None,
+) -> str:
+    speed, steer, route_error, offroad, collision, stop_at_line = vec[:6]
     speed_f = float(speed)
     steer_f = float(steer)
+    end_x = float(route_error)
     off_f = float(offroad)
     hit = bool(collision)
     halt = bool(stop_at_line)
     chosen = style or OPTION_TAG_STYLE
+    centering = ""
+    if ego_x is not None:
+        now = abs(float(ego_x))
+        later = abs(end_x)
+        if later + 0.05 < now:
+            centering = "centering"
+        elif later > now + 0.05:
+            centering = "diverging"
+        else:
+            centering = "holding"
+    run_red = str(signal or "").lower() == "red" and (not halt) and abs(speed_f) > 0.8
     if chosen == "csv":
-        return f"{speed_f:.1f},{steer_f:+.2f},{off_f:.2f},{int(hit)},{int(halt)}"
+        base = f"{speed_f:.1f},{steer_f:+.2f},{off_f:.2f},{int(hit)},{int(halt)}"
+        if signal is not None:
+            base += f",{int(run_red)}"
+        return base
     if chosen == "verbose":
-        return (
-            f"speed {speed_f:.1f} m/s, steer {steer_f:+.2f}, "
-            f"collision {hit}, stop_at_line {halt}"
-        )
-    return (
-        f"{speed_f:.1f}m/s steer {steer_f:+.2f} "
-        f"collision={'yes' if hit else 'no'} halt={'yes' if halt else 'no'}"
-    )
+        bits = [
+            f"speed {speed_f:.1f} m/s, steer {steer_f:+.2f}",
+            f"collision {hit}, stop_at_line {halt}",
+        ]
+        if centering:
+            bits.append(centering)
+        if run_red:
+            bits.append("violates_signal=yes")
+        return ", ".join(bits)
+    parts = [
+        f"{speed_f:.1f}m/s",
+        f"steer {steer_f:+.2f}",
+    ]
+    if centering:
+        parts.append(centering)
+    parts.append(f"collision={'yes' if hit else 'no'}")
+    parts.append(f"halt={'yes' if halt else 'no'}")
+    if run_red:
+        parts.append("violates_signal=yes")
+    return " ".join(parts)
 
 
 # Planner worker (demo/jevpilot/assets/planner.worker-*.js) policy, 1D track rewrite.
@@ -181,7 +230,7 @@ def rollout(
     crossed_line = False
     for _ in range(PLAN_POINTS):
         accel = max(-12.0, min(6.0, (target_speed - v) * 4.0))
-        v = max(0.0, v + accel * PLAN_DT)
+        v = max(-5.0, v + accel * PLAN_DT)
         steer += (target_steer - steer) * 6.0 * PLAN_DT
         z += v * PLAN_DT
         x += steer * v * PLAN_DT * 2.0
@@ -208,10 +257,15 @@ def rollout(
     }
 
 
-def _speed_fraction(index: int, rng: random.Random) -> float:
-    """Mirror worker mix without required-stop (O) or queue (R) branches."""
+def _speed_fraction(index: int, rng: random.Random, speed: float = 0.0) -> float:
+    """Mirror worker mix without required-stop (O) or queue (R) branches.
+
+    Index 1 is reverse when the car is slow (planning-max < 0.15 analogue).
+    """
     if index == 0:
         return 0.0
+    if index == 1 and speed < 4.0:
+        return -(0.35 + rng.random() * 0.35)
     if index <= 4:
         return 0.25 + rng.random() * 0.30
     if index % 5 == 0:
@@ -248,7 +302,11 @@ def sample_trajectories(
     attempt = 0
     while kept < MAX_SAMPLES and attempt < 40:
         steer = _steer_sample(attempt, rng, current_steer)
-        target_speed = cap * _speed_fraction(attempt, rng)
+        frac = _speed_fraction(attempt, rng, speed)
+        if frac < 0:
+            target_speed = -min(4.0, 1.2 + abs(frac) * 4.0)
+        else:
+            target_speed = cap * frac
         geom = rollout(
             ego_x,
             ego_z,
@@ -265,7 +323,7 @@ def sample_trajectories(
             continue
         sid = f"t{kept:02d}"
         desc = (
-            f"target {target_speed:.1f} m/s, steer {steer:+.2f}, "
+            f"{'reverse ' if target_speed < 0 else ''}target {target_speed:.1f} m/s, steer {steer:+.2f}, "
             f"end_speed {geom['end_speed']:.1f} m/s, end_x {geom['end_x']:.1f} m, "
             f"collision {geom['collision']}, halt_geom {geom['stop_at_line']}"
         )

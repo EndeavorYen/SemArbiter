@@ -1,7 +1,7 @@
-"""Zero-shot visual evidence for JevPilot. Leaves stay sampled trajectories.
+"""Visual evidence for JevPilot. Leaves stay sampled trajectories.
 
-CLIP is the default encoder (small, cached). SigLIP/MobileCLIP load if the
-env var SEMIF_VISION_MODEL points at them. Tests use synthetic labels, not weights.
+Default encoder is SigLIP (#48). Patch tokens (32–64) are a visual prefix for
+the sliced head; compact scores are HUD-only. Tests use synthetic labels.
 """
 
 from __future__ import annotations
@@ -12,7 +12,17 @@ import os
 import time
 from typing import Any, Dict, Optional
 
-VISION_FIELDS = ("backend", "signal", "red", "green", "pedestrian", "vehicle", "construction")
+VISION_FIELDS = (
+    "backend",
+    "signal",
+    "event",
+    "red",
+    "green",
+    "pedestrian",
+    "vehicle",
+    "construction",
+    "prefix_tokens",
+)
 
 _PROMPTS = (
     ("red", "a red traffic light facing the camera"),
@@ -22,6 +32,164 @@ _PROMPTS = (
     ("construction", "orange traffic cones and a construction barrier on the road"),
     ("clear", "an empty asphalt road with no people or cars"),
 )
+
+
+class _BoxAcc:
+    def __init__(self) -> None:
+        self.n = 0
+        self.xmin = 10**9
+        self.xmax = -1
+        self.ymin = 10**9
+        self.ymax = -1
+
+    def add(self, x: int, y: int) -> None:
+        self.n += 1
+        if x < self.xmin:
+            self.xmin = x
+        if x > self.xmax:
+            self.xmax = x
+        if y < self.ymin:
+            self.ymin = y
+        if y > self.ymax:
+            self.ymax = y
+
+    def as_dict(self, width: int, height: int) -> Optional[Dict[str, float]]:
+        if self.n < 12:
+            return None
+        bw = max(1, self.xmax - self.xmin + 1)
+        bh = max(1, self.ymax - self.ymin + 1)
+        return {
+            "cx": (self.xmin + self.xmax) / 2.0 / float(width),
+            "cy": (self.ymin + self.ymax) / 2.0 / float(height),
+            "w": bw / float(width),
+            "h": bh / float(height),
+            "area": self.n / float(width * height),
+        }
+
+
+def blobs_from_frame(image: Any) -> Dict[str, Dict[str, float]]:
+    """Axis-aligned blobs from RGB pixels. No world coordinates."""
+    rgb = image.convert("RGB")
+    width, height = rgb.size
+    pix = rgb.load()
+    acc = {
+        "light_red": _BoxAcc(),
+        "light_green": _BoxAcc(),
+        "vehicle": _BoxAcc(),
+        "pedestrian": _BoxAcc(),
+        "construction": _BoxAcc(),
+    }
+    for y in range(height):
+        for x in range(width):
+            r, g, b = pix[x, y]
+            if y < int(height * 0.48) and r > 180 and g < 90 and b < 90:
+                acc["light_red"].add(x, y)
+            elif y < int(height * 0.48) and g > 150 and r < 90 and b < 90:
+                acc["light_green"].add(x, y)
+            elif y > int(height * 0.48) and r > 180 and 70 < g < 190 and b < 90:
+                acc["construction"].add(x, y)
+            elif y > int(height * 0.50) and r < 55 and g < 55 and b < 55:
+                acc["pedestrian"].add(x, y)
+            elif y > int(height * 0.55) and (
+                (85 <= r <= 130 and abs(r - g) < 18 and abs(g - b) < 18)
+                or (r > 160 and g < 80 and b < 80)
+            ):
+                acc["vehicle"].add(x, y)
+    out: Dict[str, Dict[str, float]] = {}
+    for key, box in acc.items():
+        packed = box.as_dict(width, height)
+        if packed is not None:
+            out[key] = packed
+    return out
+
+
+def frame_motion(
+    prev: Optional[Dict[str, Dict[str, float]]],
+    curr: Dict[str, Dict[str, float]],
+) -> list[Dict[str, Any]]:
+    """Pixel-space onset / grow / cut-in. Tau is not emitted as seconds."""
+    prev = prev or {}
+    events: list[Dict[str, Any]] = []
+    for kind, now in curr.items():
+        was = prev.get(kind)
+        if was is None:
+            events.append({"kind": kind, "onset": True, "growing": False, "cut_in": False})
+            continue
+        growing = now["w"] > was["w"] + max(0.015, 0.08 * was["w"])
+        toward_center = abs(now["cx"] - 0.5) + 0.03 < abs(was["cx"] - 0.5)
+        shifted = abs(now["cx"] - was["cx"]) > 0.03
+        events.append(
+            {
+                "kind": kind,
+                "onset": False,
+                "growing": growing,
+                "cut_in": toward_center and shifted,
+            }
+        )
+    return events
+
+
+def event_from_motion(motion: list[Dict[str, Any]], signal: str = "unknown") -> str:
+    clauses: list[str] = []
+    if signal == "red" or any(m["kind"] == "light_red" for m in motion):
+        clauses.append("RED signal ahead, mandatory stop")
+    elif signal == "green" or any(m["kind"] == "light_green" for m in motion):
+        clauses.append("traffic light is green")
+    for item in motion:
+        kind = item["kind"]
+        if kind.startswith("light_"):
+            continue
+        name = {"vehicle": "vehicle", "pedestrian": "person", "construction": "cones or barrier"}.get(kind, kind)
+        if item["onset"]:
+            clauses.append(f"a {name} appeared in frame")
+        elif kind == "vehicle" and item["cut_in"] and item["growing"]:
+            clauses.append("caution: vehicle cutting toward frame center, growing in the camera")
+        elif item["growing"]:
+            clauses.append(f"caution: {name} closing, growing in the camera")
+        elif item["cut_in"]:
+            clauses.append(f"caution: {name} sliding toward frame center")
+        elif kind == "vehicle":
+            clauses.append("vehicle visible ahead")
+        elif kind == "pedestrian":
+            clauses.append("pedestrian visible ahead")
+        elif kind == "construction":
+            clauses.append("construction or cones visible ahead")
+    if not clauses:
+        return "road clear ahead, maintain lane"
+    # Keep one sentence for the prompt.
+    return "; ".join(clauses[:3])
+
+
+def camera_event(curr: Dict[str, Any], prev: Optional[Dict[str, Any]] = None) -> str:
+    """Score-delta fallback when the frame has no trackable blob."""
+    clauses: list[str] = []
+    signal = str(curr.get("signal") or "unknown")
+    if signal == "red":
+        clauses.append("RED signal ahead, mandatory stop")
+    elif signal == "green":
+        clauses.append("traffic light is green")
+
+    def rise(key: str, floor: float = 0.28, jump: float = 0.12) -> tuple[bool, bool]:
+        now = float(curr.get(key) or 0.0)
+        was = float((prev or {}).get(key) or 0.0)
+        return now >= floor, (now - was) >= jump
+
+    veh_hot, veh_up = rise("vehicle")
+    if veh_hot and veh_up:
+        clauses.append("a vehicle appeared in frame")
+    elif veh_hot:
+        clauses.append("vehicle visible ahead")
+    ped_hot, ped_up = rise("pedestrian")
+    if ped_hot and ped_up:
+        clauses.append("a person appeared in frame")
+    elif ped_hot:
+        clauses.append("pedestrian visible ahead")
+    con_hot, _con_up = rise("construction")
+    if con_hot:
+        clauses.append("construction or cones visible ahead")
+    if not clauses:
+        return "road clear ahead, maintain lane"
+    return "; ".join(clauses)
 
 
 def compact_vision(vision: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -43,7 +211,7 @@ def synthetic_vision(**labels: Any) -> Dict[str, Any]:
         signal = "red"
     elif green >= 0.35:
         signal = "green"
-    return {
+    out = {
         "backend": "synthetic",
         "signal": signal,
         "red": round(red, 3),
@@ -51,7 +219,10 @@ def synthetic_vision(**labels: Any) -> Dict[str, Any]:
         "pedestrian": round(float(labels.get("pedestrian", 0.0)), 3),
         "vehicle": round(float(labels.get("vehicle", 0.0)), 3),
         "construction": round(float(labels.get("construction", 0.0)), 3),
+        "prefix_tokens": 0,
     }
+    out["event"] = camera_event(out, None)
+    return out
 
 
 def render_scenario_frame(scenario: str, env: Any = None) -> Any:
@@ -110,66 +281,170 @@ def decode_image_bytes(image_b64: str) -> Any:
     return Image.open(io.BytesIO(blob)).convert("RGB")
 
 
+def prefix_count() -> int:
+    raw = os.environ.get("SEMIF_VISION_PATCHES", "32")
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        n = 32
+    return max(32, min(64, n))
+
+
 class VisionEncoder:
     def __init__(self, model_id: Optional[str] = None, device: str = "cpu"):
-        self.model_id = model_id or os.environ.get("SEMIF_VISION_MODEL", "openai/clip-vit-base-patch32")
+        self.model_id = model_id or os.environ.get(
+            "SEMIF_VISION_MODEL",
+            "google/siglip-base-patch16-224",
+        )
         self.device = device
         self.backend = "stub"
         self._model = None
         self._processor = None
+        self._tokenizer = None
+        self._image_proc = None
+        self.last_patches = None
+        self.last_scores = None
+        self.last_blobs = None
+        self._null_patches = None
         self._load()
 
     def _load(self) -> None:
         try:
             import torch
-            from tokenizers import processors as tok_processors
-            from transformers.models.clip import tokenization_clip as clip_tok
 
-            orig = tok_processors.RobertaProcessing
-
-            def _roberta(sep, cls=None, cls_token=None, trim_offsets=True, add_prefix_space=True, **_kw):
-                token = cls_token if cls_token is not None else cls
-                return orig(sep, token, trim_offsets=trim_offsets, add_prefix_space=add_prefix_space)
-
-            tok_processors.RobertaProcessing = _roberta
-            clip_tok.processors.RobertaProcessing = _roberta
-
-            from transformers import CLIPImageProcessor, CLIPModel, CLIPTokenizer
-
-            tokenizer = CLIPTokenizer.from_pretrained(self.model_id)
-            image_proc = CLIPImageProcessor.from_pretrained(self.model_id)
-            self._tokenizer = tokenizer
-            self._image_proc = image_proc
-            self._model = CLIPModel.from_pretrained(self.model_id)
-            self._model.to(self.device)
-            self._model.eval()
-            self.backend = self.model_id
             self._torch = torch
+            if "clip-vit" in self.model_id and "siglip" not in self.model_id.lower():
+                self._load_clip()
+            else:
+                try:
+                    self._load_auto()
+                except Exception:
+                    if "siglip" in self.model_id.lower():
+                        raise
+                    self._load_clip()
         except Exception:
             self.backend = "stub"
             self._model = None
+            self._processor = None
             self._tokenizer = None
             self._image_proc = None
+            self.last_patches = None
+
+    def _load_auto(self) -> None:
+        from transformers import AutoModel, SiglipImageProcessor
+
+        # AutoProcessor needs SentencePiece; AutoImageProcessor needs torchvision.
+        # Image processor + AutoModel is enough for patch tokens (#48).
+        self._image_proc = SiglipImageProcessor.from_pretrained(self.model_id)
+        self._processor = None
+        try:
+            from transformers import AutoProcessor
+
+            self._processor = AutoProcessor.from_pretrained(self.model_id)
+        except Exception:
+            self._processor = None
+        self._model = AutoModel.from_pretrained(self.model_id)
+        self._model.to(self.device)
+        self._model.eval()
+        self.backend = self.model_id
+
+    def _load_clip(self) -> None:
+        from tokenizers import processors as tok_processors
+        from transformers.models.clip import tokenization_clip as clip_tok
+
+        orig = tok_processors.RobertaProcessing
+
+        def _roberta(sep, cls=None, cls_token=None, trim_offsets=True, add_prefix_space=True, **_kw):
+            token = cls_token if cls_token is not None else cls
+            return orig(sep, token, trim_offsets=trim_offsets, add_prefix_space=add_prefix_space)
+
+        tok_processors.RobertaProcessing = _roberta
+        clip_tok.processors.RobertaProcessing = _roberta
+
+        from transformers import CLIPImageProcessor, CLIPModel, CLIPTokenizer
+
+        self._tokenizer = CLIPTokenizer.from_pretrained(self.model_id)
+        self._image_proc = CLIPImageProcessor.from_pretrained(self.model_id)
+        self._model = CLIPModel.from_pretrained(self.model_id)
+        self._model.to(self.device)
+        self._model.eval()
+        self.backend = self.model_id
+
+    def encode_patches(self, image: Any):
+        """Return [prefix_count, dim] patch tokens. None if the encoder is a stub."""
+        if self._model is None:
+            return None
+        from semif_phase1.visual_prefix import pool_patches
+
+        torch = self._torch
+        pixel = self._pixel_values(image)
+        vision = getattr(self._model, "vision_model", None)
+        if vision is None:
+            return None
+        with torch.no_grad():
+            out = vision(pixel_values=pixel)
+        hidden = getattr(out, "last_hidden_state", None)
+        if hidden is None:
+            hidden = out[0]
+        if hidden.shape[1] > 1:
+            # Drop class token when the sequence is patches+1.
+            maybe_cls = hidden[:, 1:, :]
+            if maybe_cls.shape[1] in {49, 196, 256, 729} or maybe_cls.shape[1] % 7 == 0:
+                hidden = maybe_cls
+        pooled = pool_patches(hidden, prefix_count())
+        return pooled[0].detach()
+
+    def _pixel_values(self, image: Any):
+        torch = self._torch
+        if self._processor is not None:
+            packed = self._processor(images=image, return_tensors="pt")
+            pixel = packed["pixel_values"]
+        else:
+            packed = self._image_proc(images=image, return_tensors="pt")
+            pixel = packed["pixel_values"]
+        return pixel.to(self.device)
+
+    def null_patches(self):
+        if self._null_patches is not None:
+            return self._null_patches
+        from PIL import Image
+
+        blank = Image.new("RGB", (224, 224), (127, 127, 127))
+        self._null_patches = self.encode_patches(blank)
+        return self._null_patches
 
     def infer_pil(self, image: Any) -> Dict[str, Any]:
-        if self._model is None or self._tokenizer is None or self._image_proc is None:
-            return synthetic_vision()
+        patches = self.encode_patches(image)
+        self.last_patches = patches
+        n_prefix = int(patches.shape[0]) if patches is not None else 0
+        if self._model is None:
+            ev = synthetic_vision()
+            ev["prefix_tokens"] = 0
+            return ev
         torch = self._torch
         texts = [text for _key, text in _PROMPTS]
-        text_inputs = self._tokenizer(texts, padding=True, return_tensors="pt")
-        image_inputs = self._image_proc(images=image, return_tensors="pt")
-        inputs = {**text_inputs, **image_inputs}
-        inputs = {key: value.to(self.device) for key, value in inputs.items()}
-        with torch.no_grad():
-            out = self._model(**inputs)
-            probs = out.logits_per_image.softmax(dim=-1)[0].tolist()
-        scores = {key: float(prob) for (key, _prompt), prob in zip(_PROMPTS, probs)}
+        try:
+            if self._processor is not None:
+                inputs = self._processor(text=texts, images=image, padding=True, return_tensors="pt")
+            else:
+                text_inputs = self._tokenizer(texts, padding=True, return_tensors="pt")
+                image_inputs = self._image_proc(images=image, return_tensors="pt")
+                inputs = {**text_inputs, **image_inputs}
+            inputs = {key: value.to(self.device) for key, value in inputs.items()}
+            with torch.no_grad():
+                out = self._model(**inputs)
+                logits = out.logits_per_image
+                probs = logits.softmax(dim=-1)[0].tolist()
+            scores = {key: float(prob) for (key, _prompt), prob in zip(_PROMPTS, probs)}
+        except Exception:
+            scores = {key: 0.0 for key, _prompt in _PROMPTS}
+            scores["clear"] = 1.0
         signal = "unknown"
         if scores["red"] >= 0.28 and scores["red"] >= scores["green"]:
             signal = "red"
         elif scores["green"] >= 0.28:
             signal = "green"
-        return {
+        packed = {
             "backend": self.backend,
             "signal": signal,
             "red": round(scores["red"], 3),
@@ -177,7 +452,24 @@ class VisionEncoder:
             "pedestrian": round(scores["pedestrian"], 3),
             "vehicle": round(scores["vehicle"], 3),
             "construction": round(scores["construction"], 3),
+            "prefix_tokens": n_prefix,
         }
+        blobs = blobs_from_frame(image)
+        motion = frame_motion(self.last_blobs, blobs)
+        if motion:
+            packed["event"] = event_from_motion(motion, packed["signal"])
+        else:
+            packed["event"] = camera_event(packed, self.last_scores)
+        self.last_blobs = blobs
+        self.last_scores = {
+            "signal": packed["signal"],
+            "red": packed["red"],
+            "green": packed["green"],
+            "pedestrian": packed["pedestrian"],
+            "vehicle": packed["vehicle"],
+            "construction": packed["construction"],
+        }
+        return packed
 
     def infer_b64(self, image_b64: str) -> Dict[str, Any]:
         t0 = time.perf_counter()

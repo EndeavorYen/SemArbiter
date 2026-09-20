@@ -13,49 +13,26 @@
   const chrome = document.createElement("div");
   chrome.id = "fsd-chrome";
   chrome.innerHTML = `
-    <div id="fsd-gear" aria-label="Gear">
-      <span data-gear="P">P</span>
-      <span data-gear="R">R</span>
-      <span data-gear="N">N</span>
-      <span data-gear="D" data-active="true">D</span>
-    </div>
-    <div id="fsd-pill" role="status"></div>
     <div id="fsd-halo" aria-hidden="true"></div>
     <div id="fsd-boxes"></div>
-    <button id="fsd-raw-toggle" type="button" aria-pressed="false">Raw decision</button>
-    <button id="fsd-drawer-toggle" type="button">Decision</button>
-    <aside id="fsd-drawer" data-open="false">
-      <h2>Decision</h2>
-      <div class="fsd-intent" id="fsd-intent">SAFE_CRUISE</div>
-      <p id="fsd-directive">Waiting for the first SemIf decision.</p>
-      <div id="fsd-probs"></div>
-    </aside>
-    <div id="fsd-seed"></div>
-    <div id="fsd-vision" aria-label="Vision">VISION off</div>
+    <div id="fsd-status" aria-live="polite">
+      <span id="fsd-seed"></span>
+      <span id="fsd-intent">SemIf</span>
+      <span id="fsd-vision">VISION off</span>
+    </div>
   `;
   document.body.appendChild(chrome);
 
-  const pill = document.getElementById("fsd-pill");
   const halo = document.getElementById("fsd-halo");
   const boxes = document.getElementById("fsd-boxes");
-  const drawer = document.getElementById("fsd-drawer");
-  const rawBtn = document.getElementById("fsd-raw-toggle");
   const seedEl = document.getElementById("fsd-seed");
   const visionEl = document.getElementById("fsd-vision");
+  const intentEl = document.getElementById("fsd-intent");
   const visionOn = params.get("vision") !== "0";
   window.SEMIF_VISION = null;
-  const intentEl = document.getElementById("fsd-intent");
-  const directiveEl = document.getElementById("fsd-directive");
-  const probsEl = document.getElementById("fsd-probs");
-
-  document.getElementById("fsd-drawer-toggle").addEventListener("click", () => {
-    drawer.dataset.open = drawer.dataset.open === "true" ? "false" : "true";
-  });
 
   function applyRawMode(on) {
     window.SEMIF_RAW_MODE = !!on;
-    rawBtn.setAttribute("aria-pressed", on ? "true" : "false");
-    rawBtn.textContent = on ? "Raw decision ON" : "Raw decision";
     const sim = window.SEMIF_SIM;
     if (!sim) return;
     sim.rawMode = !!on;
@@ -67,8 +44,6 @@
       }
     }
   }
-
-  rawBtn.addEventListener("click", () => applyRawMode(!window.SEMIF_RAW_MODE));
 
   const origFetch = window.fetch.bind(window);
   window.fetch = function (url, opts) {
@@ -90,35 +65,74 @@
       } catch (_err) {
         /* leave request unchanged */
       }
-      return origFetch(url, opts).then((res) => {
-        const clone = res.clone();
-        clone.json().then((data) => {
-          if (data && data.meta) renderDecision(data);
-        }).catch(() => {});
-        return res;
+      return origFetch(url, opts).then(async (res) => {
+        let data;
+        try {
+          data = await res.json();
+        } catch (_err) {
+          return res;
+        }
+        try {
+          data = fillJevAnswers(data, JSON.parse(opts.body));
+        } catch (_err) {
+          /* keep server JSON */
+        }
+        if (data && data.meta) renderDecision(data);
+        return new Response(JSON.stringify(data), {
+          status: res.status,
+          statusText: res.statusText,
+          headers: { "Content-Type": "application/json" },
+        });
       });
     }
     return origFetch(url, opts);
   };
 
+  function mockChoice(ids, pick) {
+    const probs = {};
+    const rest = Math.max(ids.length - 1, 1);
+    for (const id of ids) probs[id] = id === pick ? 0.85 : 0.15 / rest;
+    const total = Object.values(probs).reduce((a, b) => a + b, 0) || 1;
+    for (const id of ids) probs[id] = Math.round((probs[id] / total) * 1e4) / 1e4;
+    return { choice: pick, probabilities: probs };
+  }
+
+  function fillJevAnswers(data, req) {
+    if (!data || typeof data !== "object") return data;
+    const answers = data.answers || (data.answers = {});
+    const qs = (req && req.questions) || {};
+    const motionCrit = qs.motion && qs.motion.criteria;
+    if (motionCrit && typeof motionCrit === "object" && !answers.motion) {
+      const ids = Object.keys(motionCrit);
+      if (ids.length) {
+        const pick = ids.indexOf("drive") >= 0 ? "drive" : ids[0];
+        answers.motion = mockChoice(ids, pick);
+      }
+    }
+    const vectorCrit = qs.vector && qs.vector.criteria;
+    if (vectorCrit && typeof vectorCrit === "object" && answers.vector) {
+      const ids = Object.keys(vectorCrit);
+      if (ids.length) {
+        const raw = answers.vector.probabilities || {};
+        const pick = ids.indexOf(answers.vector.choice) >= 0 ? answers.vector.choice : ids[0];
+        const filled = {};
+        for (const id of ids) {
+          const p = Number(raw[id]);
+          filled[id] = Number.isFinite(p) ? Math.min(1, Math.max(0, p)) : id === pick ? 0.8 : 0;
+        }
+        const sum = Object.values(filled).reduce((a, b) => a + b, 0) || 1;
+        for (const id of ids) filled[id] = filled[id] / sum;
+        answers.vector = { choice: pick, probabilities: filled };
+      }
+    }
+    return data;
+  }
+
   function renderDecision(data) {
     const meta = data.meta || {};
-    const intent = meta.tier1_maneuver || "SAFE_CRUISE";
-    intentEl.textContent = intent;
-    directiveEl.textContent = meta.tier1_directive || "";
-    const show = intent && intent !== "SAFE_CRUISE" && intent !== "GEOMETRIC_HEURISTIC" && intent !== "CRUISE";
-    pill.textContent = String(intent).replace(/_/g, " ");
-    pill.dataset.show = show ? "true" : "false";
-    const vector = (data.answers && data.answers.vector) || {};
-    const probs = vector.probabilities || {};
-    probsEl.innerHTML = Object.keys(probs)
-      .sort((a, b) => probs[b] - probs[a])
-      .slice(0, 6)
-      .map((id) => {
-        const pct = Math.round((probs[id] || 0) * 100);
-        return `<div class="fsd-prob"><b>${id}</b><span class="fsd-bar"><i style="width:${pct}%"></i></span><span>${pct}%</span></div>`;
-      })
-      .join("");
+    const intent = meta.tier1_maneuver || "SemIf";
+    const choice = data.answers && data.answers.vector && data.answers.vector.choice;
+    intentEl.textContent = choice ? `${intent} · ${choice}` : String(intent).replace(/_/g, " ");
   }
 
   function project(camera, x, y, z, width, height) {
@@ -167,66 +181,50 @@
       const roll = (sim.planRandom ? sim.planRandom() : Math.random());
       if (roll < 0.45) {
         const pose = aheadOf(player, 26 + roll * 12, (roll > 0.2 ? 6 : -6));
-        const ped = {
+        sim._fsdAgents.push({
           id: `frustum-ped-${sim.time.toFixed(2)}`,
           type: "pedestrian",
           x: pose.x,
           z: pose.z,
           heading: player.heading + Math.PI / 2,
           walking: true,
-          crossing: true,
-          jaywalker: true,
-          progress: 0,
           direction: 1,
           speed: 1.4,
-          width: 0.6,
-          depth: 0.6,
           height: 1.7,
-          nodeId: "frustum",
           _fsd: "pedestrian",
-          walkPath: { start: pose, heading: player.heading + Math.PI / 2, length: 14 },
-        };
-        sim.pedestrians.push(ped);
-        sim._fsdAgents.push(ped);
+          walkPath: { heading: player.heading + Math.PI / 2 },
+        });
       } else if (roll < 0.75) {
         const pose = aheadOf(player, 22, 3.1);
-        const parked = {
+        sim._fsdAgents.push({
           id: `frustum-park-${sim.time.toFixed(2)}`,
           type: "car",
           x: pose.x,
           z: pose.z,
           heading: player.heading,
           speed: 0,
-          width: 1.8,
-          depth: 4.4,
           height: 1.5,
           hazardLights: true,
           _fsd: "parked",
-        };
-        sim.traffic.push(parked);
-        sim._fsdAgents.push(parked);
+        });
       } else {
         const pose = aheadOf(player, 24, 3.4);
-        const cut = {
+        sim._fsdAgents.push({
           id: `frustum-cut-${sim.time.toFixed(2)}`,
           type: "car",
           x: pose.x,
           z: pose.z,
           heading: player.heading,
           speed: Math.max(6, (player.speed || 12) * 0.7),
-          width: 1.8,
-          depth: 4.4,
           height: 1.5,
           _fsd: "cutin",
           _cut: 1.6,
-        };
-        sim.traffic.push(cut);
-        sim._fsdAgents.push(cut);
+        });
       }
     }
 
     for (const agent of sim._fsdAgents) {
-      if (agent._fsd === "pedestrian" && agent.walking) {
+      if (agent._fsd === "pedestrian" && agent.walking && agent.walkPath) {
         const h = agent.walkPath.heading;
         agent.x += Math.sin(h) * 1.6 * dt * agent.direction;
         agent.z -= Math.cos(h) * 1.6 * dt * agent.direction;
@@ -250,7 +248,7 @@
     const player = sim.player;
     const targets = []
       .concat(sim.pedestrians || [])
-      .concat((sim.traffic || []).filter((v) => v.hazardLights || v._fsd));
+      .concat((sim.traffic || []).filter((v) => v.hazardLights));
     let nearest = Infinity;
     for (const obj of targets) {
       const d = dist2(obj, player);
@@ -283,14 +281,6 @@
     }
   }
 
-  function syncGear(sim) {
-    const speed = sim && sim.player ? sim.player.speed : 0;
-    const gear = speed < -0.4 ? "R" : speed < 0.35 ? "P" : "D";
-    for (const el of document.querySelectorAll("#fsd-gear span")) {
-      el.dataset.active = el.dataset.gear === gear ? "true" : "false";
-    }
-  }
-
   function tick() {
     const sim = window.SEMIF_SIM;
     const world = window.SEMIF_WORLD;
@@ -300,13 +290,32 @@
         applyRawMode(window.SEMIF_RAW_MODE);
         const orig = sim.step.bind(sim);
         sim.step = function (dt) {
-          injectFrustumEvents(sim, Math.min(dt || 0.016, 0.05));
-          return orig(dt);
+          let out;
+          try {
+            out = orig(dt);
+          } catch (err) {
+            console.warn("semif: sim.step", err);
+            return out;
+          }
+          try {
+            injectFrustumEvents(sim, Math.min(dt || 0.016, 0.05));
+          } catch (_err) {
+            /* HUD ghosts must not kill the drive loop */
+          }
+          try {
+            const p = sim.player;
+            if (p && typeof p.steer === "number") {
+              sim._steerEma = sim._steerEma == null ? p.steer : 0.65 * sim._steerEma + 0.35 * p.steer;
+              p.steer = sim._steerEma;
+            }
+          } catch (_err) {
+            /* EMA must not kill the drive loop */
+          }
+          return out;
         };
       }
       const seed = sim.world && sim.world.seed;
       seedEl.textContent = seed != null ? `seed ${seed}` : "";
-      syncGear(sim);
       drawBoxes(sim, world);
     }
     requestAnimationFrame(tick);
@@ -347,13 +356,15 @@
       const vis = data.vision || data;
       window.SEMIF_VISION = vis;
       const sig = vis.signal || "unknown";
-      visionEl.textContent = [
-        "VISION",
-        vis.backend || "stub",
-        "sig " + sig,
-        "ped " + (vis.pedestrian != null ? Number(vis.pedestrian).toFixed(2) : "—"),
-        "veh " + (vis.vehicle != null ? Number(vis.vehicle).toFixed(2) : "—"),
-      ].join(" · ");
+      visionEl.textContent = vis.event
+        ? ["VISION", vis.event].join(" · ")
+        : [
+            "VISION",
+            vis.backend || "stub",
+            "sig " + sig,
+            "ped " + (vis.pedestrian != null ? Number(vis.pedestrian).toFixed(2) : "—"),
+            "veh " + (vis.vehicle != null ? Number(vis.vehicle).toFixed(2) : "—"),
+          ].join(" · ");
     } catch (_err) {
       visionEl.textContent = "VISION error";
     }
