@@ -53,6 +53,40 @@
     if (ev.key === "Enter") reloadWithSeed(seedInput.value);
   });
 
+  const STALL_SPEED = 0.2;
+  const STALL_PROGRESS_M = 0.5;
+  const STALL_HOLD_S = 3.0;
+  const STALL_COOLDOWN_S = 8.0;
+
+  function requestEgoReplan(sim, dt) {
+    const p = sim && sim.player;
+    if (!p) return;
+    if (!sim.autopilot) {
+      sim._stallHeld = 0;
+      sim._stallS0 = p.s;
+      return;
+    }
+    sim._stallCool = Math.max(0, (sim._stallCool || 0) - (dt || 0));
+    const speed = Math.abs(Number(p.speed) || 0);
+    if (speed >= STALL_SPEED) {
+      sim._stallHeld = 0;
+      sim._stallS0 = p.s;
+      return;
+    }
+    if (sim._stallS0 == null) sim._stallS0 = p.s;
+    sim._stallHeld = (sim._stallHeld || 0) + (dt || 0);
+    const progress = Number.isFinite(p.s) && Number.isFinite(sim._stallS0)
+      ? Math.abs(p.s - sim._stallS0)
+      : 0;
+    if (sim._stallHeld < STALL_HOLD_S || progress >= STALL_PROGRESS_M || sim._stallCool > 0) return;
+    sim._stallHeld = 0;
+    sim._stallS0 = p.s;
+    sim._stallCool = STALL_COOLDOWN_S;
+    sim.offRouteSince = sim.time;
+    sim.nextRouteCheck = sim.time;
+    if (typeof sim.rerouteIfNeeded === "function") sim.rerouteIfNeeded();
+  }
+
   function applyRawMode(on) {
     window.SEMIF_RAW_MODE = !!on;
     const sim = window.SEMIF_SIM;
@@ -332,6 +366,11 @@
             injectFrustumEvents(sim, Math.min(dt || 0.016, 0.05));
           } catch (_err) {
             /* HUD ghosts must not kill the drive loop */
+          }
+          try {
+            requestEgoReplan(sim, dt);
+          } catch (_err) {
+            /* replan must not kill the drive loop */
           }
           return out;
         };
