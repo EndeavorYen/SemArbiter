@@ -39,7 +39,7 @@ python benchmarks/benchmark_jevpilot_vision.py --episodes 2 --seed 42 \
 ```mermaid
 flowchart LR
     Canvas["3D canvas JPEG"] --> Vision["/v1/vision SigLIP (慢迴圈 10-20Hz)"]
-    Vision --> Evidence["state.vision (HUD 標籤與機率)"]
+    Vision --> Evidence["state.vision.event (一句相機事件)"]
     Sampler["幾何採樣器 tXX"] --> Cands["candidates"]
     Evidence --> State["compact_jev_state"]
     State --> SemIf["SemIf Sliced Head (快迴圈 50Hz)<br/>512 桶 CUDA Graph"]
@@ -47,7 +47,7 @@ flowchart LR
     SemIf --> Pick["選中軌跡 ID"]
 ```
 
-像素不直接作為未訓練 token 注入決策迴圈。`compact_jev_state` 保留 `vision.signal / red / ...` 短字元，由常規 Sliced Head 進行語意仲裁。
+像素不直接作為未訓練 token 注入決策迴圈。`compact_jev_state` 只留 `vision.event` 與 `signal`。事件來自**相鄰兩張圖的像素框**（變大＝靠近、橫移向中心＝切入、上一幀沒有＝出現），不讀世界座標，不把示意幀尺度寫成「TTC 2.0s」。沒有框時才退回 CLIP 分數差。1024 桶可接受。
 
 閉環沒有 3D 相機。官方 CUDA 成績用 **編碼器看 PIL 示意幀**，`vision_mode=clip`（名稱沿用；backend 可能是 SigLIP）。載入失敗直接中止，不准退回合成標籤。
 

@@ -46,12 +46,8 @@ _SLIM_OBJECT_KEYS = {
     "other_vehicle": ("distance_m", "arriving"),
     "emergency_vehicle": ("distance_m", "behind", "siren"),
     "vision": (
+        "event",
         "signal",
-        "red",
-        "green",
-        "pedestrian",
-        "vehicle",
-        "construction",
     ),
 }
 

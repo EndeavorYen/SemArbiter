@@ -431,6 +431,12 @@ def run_jevpilot2_episode(
 
     chosen_vec = [env.speed_mps, 0.0]
     is_ood = False
+    if vision_mode == "clip":
+        from semif_phase1.vision import get_vision_encoder
+
+        _enc = get_vision_encoder()
+        _enc.last_blobs = None
+        _enc.last_scores = None
 
     while True:
         if step_count % decision_interval == 0:

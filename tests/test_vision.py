@@ -3,7 +3,16 @@ import pytest
 from benchmarks.benchmark_jevpilot_hierarchical import JevPilot2Simulator, run_jevpilot2_episode
 from demo.server import DecisionEngine
 from semif_phase1.trajectory_sampler import compact_jev_state
-from semif_phase1.vision import compact_vision, synthetic_vision, vision_from_scenario
+from semif_phase1.vision import (
+    blobs_from_frame,
+    camera_event,
+    compact_vision,
+    event_from_motion,
+    frame_motion,
+    render_scenario_frame,
+    synthetic_vision,
+    vision_from_scenario,
+)
 
 
 def test_synthetic_vision_picks_red_when_dominant():
@@ -25,6 +34,8 @@ def test_compact_state_keeps_vision_not_pixels():
     assert "candidates" not in packed
     assert "image" not in packed
     assert packed["vision"]["signal"] == "red"
+    assert "prepare to stop" in packed["vision"]["event"]
+    assert "red" not in packed["vision"]
     assert "backend" not in packed["vision"]
 
 
@@ -42,6 +53,39 @@ def test_pool_patches_is_32_tokens():
     assert tuple(pooled.shape) == (1, 32, 768)
     same = pool_patches(pooled, 32)
     assert tuple(same.shape) == (1, 32, 768)
+
+
+def test_pixel_blobs_grow_and_cut_in_without_world_coords():
+    pytest.importorskip("PIL")
+
+    class _Z:
+        def __init__(self, z):
+            self.z = z
+
+    far = render_scenario_frame("cut_in_vehicle", _Z(8.0))
+    near = render_scenario_frame("cut_in_vehicle", _Z(40.0))
+    far_b = blobs_from_frame(far)
+    near_b = blobs_from_frame(near)
+    assert "vehicle" in far_b and "vehicle" in near_b
+    assert near_b["vehicle"]["w"] > far_b["vehicle"]["w"]
+    motion = frame_motion(far_b, near_b)
+    text = event_from_motion(motion)
+    assert "TTC" not in text
+    assert "growing" in text or "closing" in text or "cutting" in text
+
+
+def test_camera_event_uses_score_delta_not_world_ttc():
+    first = camera_event({"signal": "unknown", "vehicle": 0.8})
+    assert "appeared" in first or "rising" in first or "cut-in" in first
+    assert "TTC" not in first
+    stable = camera_event(
+        {"signal": "unknown", "vehicle": 0.8},
+        {"signal": "unknown", "vehicle": 0.75},
+    )
+    assert "vehicle visible" in stable
+    red = camera_event({"signal": "red", "red": 0.9, "vehicle": 0.0})
+    assert "red" in red
+    assert "maintain lane" in camera_event({})
 
 
 def test_compact_state_drops_backend_and_patches():

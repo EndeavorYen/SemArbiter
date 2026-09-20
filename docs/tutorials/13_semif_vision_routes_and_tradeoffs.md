@@ -104,7 +104,7 @@ flowchart TD
 2. **守住 SemIf 核心優勢：純文字 Sliced Head 與極致低延遲**  
    SemIf 的精髓在於利用 Transformer 豐富的常識先驗，在極短的時間內（< 15ms）對當前幀生成的動態幾何候選做型別約束裁決。一旦引入未對齊的像素 token，系統就失去了這項確定性優勢。
 3. **零訓練工程成本，即時可驗收**  
-   直接使用 SigLIP 進行零樣本目標匹配，輸出 `red`, `pedestrian`, `clear` 等浮點證據，注入到 `compact_jev_state` 的 `_SLIM_OBJECT_KEYS["vision"]` 欄位中，立即可在 WebGPU / Three.js HUD 上透明檢驗。
+   編碼器仍做零樣本匹配；寫進 letter-slot 的是一句 `vision.event`（例如 vehicle evidence rising / red light ahead），不是無量綱裸浮點。教程 11 已量過：csv 數字會崩、words/verbose 才站得住。TTC 若沒有相機 bbox，不准用世界座標假裝算出來。
 
 ---
 

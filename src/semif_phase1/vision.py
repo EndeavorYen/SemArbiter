@@ -15,6 +15,7 @@ from typing import Any, Dict, Optional
 VISION_FIELDS = (
     "backend",
     "signal",
+    "event",
     "red",
     "green",
     "pedestrian",
@@ -31,6 +32,164 @@ _PROMPTS = (
     ("construction", "orange traffic cones and a construction barrier on the road"),
     ("clear", "an empty asphalt road with no people or cars"),
 )
+
+
+class _BoxAcc:
+    def __init__(self) -> None:
+        self.n = 0
+        self.xmin = 10**9
+        self.xmax = -1
+        self.ymin = 10**9
+        self.ymax = -1
+
+    def add(self, x: int, y: int) -> None:
+        self.n += 1
+        if x < self.xmin:
+            self.xmin = x
+        if x > self.xmax:
+            self.xmax = x
+        if y < self.ymin:
+            self.ymin = y
+        if y > self.ymax:
+            self.ymax = y
+
+    def as_dict(self, width: int, height: int) -> Optional[Dict[str, float]]:
+        if self.n < 12:
+            return None
+        bw = max(1, self.xmax - self.xmin + 1)
+        bh = max(1, self.ymax - self.ymin + 1)
+        return {
+            "cx": (self.xmin + self.xmax) / 2.0 / float(width),
+            "cy": (self.ymin + self.ymax) / 2.0 / float(height),
+            "w": bw / float(width),
+            "h": bh / float(height),
+            "area": self.n / float(width * height),
+        }
+
+
+def blobs_from_frame(image: Any) -> Dict[str, Dict[str, float]]:
+    """Axis-aligned blobs from RGB pixels. No world coordinates."""
+    rgb = image.convert("RGB")
+    width, height = rgb.size
+    pix = rgb.load()
+    acc = {
+        "light_red": _BoxAcc(),
+        "light_green": _BoxAcc(),
+        "vehicle": _BoxAcc(),
+        "pedestrian": _BoxAcc(),
+        "construction": _BoxAcc(),
+    }
+    for y in range(height):
+        for x in range(width):
+            r, g, b = pix[x, y]
+            if y < int(height * 0.48) and r > 180 and g < 90 and b < 90:
+                acc["light_red"].add(x, y)
+            elif y < int(height * 0.48) and g > 150 and r < 90 and b < 90:
+                acc["light_green"].add(x, y)
+            elif y > int(height * 0.48) and r > 180 and 70 < g < 190 and b < 90:
+                acc["construction"].add(x, y)
+            elif y > int(height * 0.50) and r < 55 and g < 55 and b < 55:
+                acc["pedestrian"].add(x, y)
+            elif y > int(height * 0.55) and (
+                (85 <= r <= 130 and abs(r - g) < 18 and abs(g - b) < 18)
+                or (r > 160 and g < 80 and b < 80)
+            ):
+                acc["vehicle"].add(x, y)
+    out: Dict[str, Dict[str, float]] = {}
+    for key, box in acc.items():
+        packed = box.as_dict(width, height)
+        if packed is not None:
+            out[key] = packed
+    return out
+
+
+def frame_motion(
+    prev: Optional[Dict[str, Dict[str, float]]],
+    curr: Dict[str, Dict[str, float]],
+) -> list[Dict[str, Any]]:
+    """Pixel-space onset / grow / cut-in. Tau is not emitted as seconds."""
+    prev = prev or {}
+    events: list[Dict[str, Any]] = []
+    for kind, now in curr.items():
+        was = prev.get(kind)
+        if was is None:
+            events.append({"kind": kind, "onset": True, "growing": False, "cut_in": False})
+            continue
+        growing = now["w"] > was["w"] + max(0.015, 0.08 * was["w"])
+        toward_center = abs(now["cx"] - 0.5) + 0.03 < abs(was["cx"] - 0.5)
+        shifted = abs(now["cx"] - was["cx"]) > 0.03
+        events.append(
+            {
+                "kind": kind,
+                "onset": False,
+                "growing": growing,
+                "cut_in": toward_center and shifted,
+            }
+        )
+    return events
+
+
+def event_from_motion(motion: list[Dict[str, Any]], signal: str = "unknown") -> str:
+    clauses: list[str] = []
+    if signal == "red" or any(m["kind"] == "light_red" for m in motion):
+        clauses.append("traffic light is red ahead, prepare to stop")
+    elif signal == "green" or any(m["kind"] == "light_green" for m in motion):
+        clauses.append("traffic light is green")
+    for item in motion:
+        kind = item["kind"]
+        if kind.startswith("light_"):
+            continue
+        name = {"vehicle": "vehicle", "pedestrian": "person", "construction": "cones or barrier"}.get(kind, kind)
+        if item["onset"]:
+            clauses.append(f"a {name} appeared in frame")
+        elif kind == "vehicle" and item["cut_in"] and item["growing"]:
+            clauses.append("caution: vehicle cutting toward frame center, growing in the camera")
+        elif item["growing"]:
+            clauses.append(f"caution: {name} closing, growing in the camera")
+        elif item["cut_in"]:
+            clauses.append(f"caution: {name} sliding toward frame center")
+        elif kind == "vehicle":
+            clauses.append("vehicle visible ahead")
+        elif kind == "pedestrian":
+            clauses.append("pedestrian visible ahead")
+        elif kind == "construction":
+            clauses.append("construction or cones visible ahead")
+    if not clauses:
+        return "road clear ahead, maintain lane"
+    # Keep one sentence for the prompt.
+    return "; ".join(clauses[:3])
+
+
+def camera_event(curr: Dict[str, Any], prev: Optional[Dict[str, Any]] = None) -> str:
+    """Score-delta fallback when the frame has no trackable blob."""
+    clauses: list[str] = []
+    signal = str(curr.get("signal") or "unknown")
+    if signal == "red":
+        clauses.append("traffic light is red ahead, prepare to stop")
+    elif signal == "green":
+        clauses.append("traffic light is green")
+
+    def rise(key: str, floor: float = 0.28, jump: float = 0.12) -> tuple[bool, bool]:
+        now = float(curr.get(key) or 0.0)
+        was = float((prev or {}).get(key) or 0.0)
+        return now >= floor, (now - was) >= jump
+
+    veh_hot, veh_up = rise("vehicle")
+    if veh_hot and veh_up:
+        clauses.append("a vehicle appeared in frame")
+    elif veh_hot:
+        clauses.append("vehicle visible ahead")
+    ped_hot, ped_up = rise("pedestrian")
+    if ped_hot and ped_up:
+        clauses.append("a person appeared in frame")
+    elif ped_hot:
+        clauses.append("pedestrian visible ahead")
+    con_hot, _con_up = rise("construction")
+    if con_hot:
+        clauses.append("construction or cones visible ahead")
+    if not clauses:
+        return "road clear ahead, maintain lane"
+    return "; ".join(clauses)
 
 
 def compact_vision(vision: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -52,7 +211,7 @@ def synthetic_vision(**labels: Any) -> Dict[str, Any]:
         signal = "red"
     elif green >= 0.35:
         signal = "green"
-    return {
+    out = {
         "backend": "synthetic",
         "signal": signal,
         "red": round(red, 3),
@@ -62,6 +221,8 @@ def synthetic_vision(**labels: Any) -> Dict[str, Any]:
         "construction": round(float(labels.get("construction", 0.0)), 3),
         "prefix_tokens": 0,
     }
+    out["event"] = camera_event(out, None)
+    return out
 
 
 def render_scenario_frame(scenario: str, env: Any = None) -> Any:
@@ -142,6 +303,8 @@ class VisionEncoder:
         self._tokenizer = None
         self._image_proc = None
         self.last_patches = None
+        self.last_scores = None
+        self.last_blobs = None
         self._null_patches = None
         self._load()
 
@@ -281,7 +444,7 @@ class VisionEncoder:
             signal = "red"
         elif scores["green"] >= 0.28:
             signal = "green"
-        return {
+        packed = {
             "backend": self.backend,
             "signal": signal,
             "red": round(scores["red"], 3),
@@ -291,6 +454,22 @@ class VisionEncoder:
             "construction": round(scores["construction"], 3),
             "prefix_tokens": n_prefix,
         }
+        blobs = blobs_from_frame(image)
+        motion = frame_motion(self.last_blobs, blobs)
+        if motion:
+            packed["event"] = event_from_motion(motion, packed["signal"])
+        else:
+            packed["event"] = camera_event(packed, self.last_scores)
+        self.last_blobs = blobs
+        self.last_scores = {
+            "signal": packed["signal"],
+            "red": packed["red"],
+            "green": packed["green"],
+            "pedestrian": packed["pedestrian"],
+            "vehicle": packed["vehicle"],
+            "construction": packed["construction"],
+        }
+        return packed
 
     def infer_b64(self, image_b64: str) -> Dict[str, Any]:
         t0 = time.perf_counter()

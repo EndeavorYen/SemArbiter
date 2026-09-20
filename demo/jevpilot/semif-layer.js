@@ -347,13 +347,15 @@
       const vis = data.vision || data;
       window.SEMIF_VISION = vis;
       const sig = vis.signal || "unknown";
-      visionEl.textContent = [
-        "VISION",
-        vis.backend || "stub",
-        "sig " + sig,
-        "ped " + (vis.pedestrian != null ? Number(vis.pedestrian).toFixed(2) : "—"),
-        "veh " + (vis.vehicle != null ? Number(vis.vehicle).toFixed(2) : "—"),
-      ].join(" · ");
+      visionEl.textContent = vis.event
+        ? ["VISION", vis.event].join(" · ")
+        : [
+            "VISION",
+            vis.backend || "stub",
+            "sig " + sig,
+            "ped " + (vis.pedestrian != null ? Number(vis.pedestrian).toFixed(2) : "—"),
+            "veh " + (vis.vehicle != null ? Number(vis.vehicle).toFixed(2) : "—"),
+          ].join(" · ");
     } catch (_err) {
       visionEl.textContent = "VISION error";
     }
