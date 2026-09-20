@@ -54,6 +54,23 @@ def synthetic_vision(**labels: Any) -> Dict[str, Any]:
     }
 
 
+def vision_from_scenario(scenario: str) -> Dict[str, Any]:
+    """Map a closed-loop scenario name to synthetic visual evidence."""
+    table: Dict[str, Dict[str, float]] = {
+        "traffic_light_red": {"red": 0.82, "green": 0.04},
+        "speed_zone_city": {"green": 0.4},
+        "pedestrian_jaywalking": {"pedestrian": 0.88},
+        "roadside_parked_hazard": {"vehicle": 0.7},
+        "cut_in_vehicle": {"vehicle": 0.8},
+        "construction_detour": {"construction": 0.85},
+        "emergency_vehicle": {"vehicle": 0.55},
+        "ambiguous_priority": {"vehicle": 0.45},
+        "sharp_curve": {},
+        "sensor_anomaly": {},
+    }
+    return synthetic_vision(**table.get(scenario, {}))
+
+
 def decode_image_bytes(image_b64: str) -> Any:
     raw = image_b64.split(",", 1)[-1]
     blob = base64.b64decode(raw)

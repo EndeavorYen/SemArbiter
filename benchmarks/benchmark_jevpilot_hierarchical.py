@@ -422,6 +422,7 @@ def run_jevpilot2_episode(
     scenario: str,
     seed: int,
     raw_mode: bool = False,
+    vision_mode: str = "off",
 ) -> Dict[str, Any]:
     env = JevPilot2Simulator(scenario, seed=seed, raw_mode=raw_mode)
     latencies = []
@@ -434,6 +435,11 @@ def run_jevpilot2_episode(
     while True:
         if step_count % decision_interval == 0:
             obs = env.get_observation()
+            if vision_mode == "synthetic":
+                from semif_phase1.vision import vision_from_scenario
+
+                obs = dict(obs)
+                obs["vision"] = vision_from_scenario(scenario)
             req = {
                 "model": engine.model_name,
                 "mode": mode,
@@ -488,6 +494,7 @@ def run_jevpilot2_episode(
         "emergency_violation": env.emergency_violation,
         "seed": seed,
         "raw_mode": raw_mode,
+        "vision_mode": vision_mode,
         "latencies": latencies,
     }
 
@@ -512,6 +519,7 @@ def evaluate_jevpilot2_mode(
     base_seed: int = 42,
     raw_mode: bool = False,
     scenarios: Optional[List[str]] = None,
+    vision_mode: str = "off",
 ) -> Dict[str, Any]:
     scenarios = list(scenarios or ALL_SCENARIOS)
     results = []
@@ -520,7 +528,9 @@ def evaluate_jevpilot2_mode(
     for sc in scenarios:
         for ep in range(episodes_per_sc):
             seed = scenario_seed(base_seed, sc, ep)
-            res = run_jevpilot2_episode(engine, mode, sc, seed, raw_mode=raw_mode)
+            res = run_jevpilot2_episode(
+                engine, mode, sc, seed, raw_mode=raw_mode, vision_mode=vision_mode
+            )
             results.append(res)
             all_latencies.extend(res["latencies"])
 
