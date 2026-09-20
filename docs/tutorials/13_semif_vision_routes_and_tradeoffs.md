@@ -1,7 +1,7 @@
 # 教程 13：SemIf-Vision 多模態路線分析與架構抉擇
 
 > **模組**：`src/semif_phase1/vision.py`、`src/semif_phase1/visual_prefix.py`、`demo/server.py`、`benchmarks/benchmark_jevpilot_vision.py`  
-> **關聯 Issue**：[ #48](https://github.com/EndeavorYen/SemIf/issues/48) [ #90](https://github.com/EndeavorYen/SemIf/issues/90) 傘 [#89](https://github.com/EndeavorYen/SemIf/issues/89)  
+> **關聯 Issue**：[ #48](https://github.com/EndeavorYen/SemIf/issues/48) [ #90](https://github.com/EndeavorYen/SemIf/issues/90) 傘 [#89](https://github.com/EndeavorYen/SemIf/issues/89)（路線圖總表）  
 > **前置閱讀**：[教程 06：LM Head 投影優化](06_transformer_lm_head_optimization.md)、[教程 07：CUDA Graphs 極限延遲](07_cuda_graphs_and_compilation.md)、[教程 10：Jev vs 分類器與架構邊界](10_jev_vs_classifier_io.md)、[教程 12：JevPilot 視覺輸入](12_jevpilot_vision.md)
 
 ---
@@ -17,6 +17,14 @@
 - **決策快迴圈（50 Hz）**：SemIf 仲裁器以極致穩定的純文字 Sliced LM Head，結合 CUDA Graph 形狀分桶，在當前動態候選軌跡中裁決本幀最優 `tXX`。
 
 本教程基於真實 GPU 閉環數據，深度覆盤為何未訓練的 Patch 投影會引發性能退化，並對三條多模態技術路線進行全方位架構評估。
+
+活的執行順序在傘 [#89](https://github.com/EndeavorYen/SemIf/issues/89)：
+
+| 優先 | Issue | 角色 |
+| :--- | :--- | :--- |
+| **P0** | [#105](https://github.com/EndeavorYen/SemIf/issues/105) + [#106](https://github.com/EndeavorYen/SemIf/issues/106) | 蛇行修復（真車道 `offset_m`）+ 網頁 Seed |
+| **P1** | [#108](https://github.com/EndeavorYen/SemIf/issues/108) + [#102](https://github.com/EndeavorYen/SemIf/issues/102) | 倒車合約對齊 + 純相機 IPM |
+| **P2** | [#103](https://github.com/EndeavorYen/SemIf/issues/103) + [#107](https://github.com/EndeavorYen/SemIf/issues/107) | 雙 Jev 快慢階層 + 死路 Replan |
 
 ---
 
