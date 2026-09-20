@@ -129,8 +129,10 @@ def test_bundle_hooks_raw_mode_and_sim():
     assert "l=!1&&O&&r<8?{x:w.x" in worker
     assert "28+(t===`city`?24:0)" in main
     assert "28+(t===`city`?24:0)" in worker
-    assert "(e.speed||0)<4&&t%5==0?-(1.6+r()*2)" in main
-    assert "(t.speed||0)<4&&r%5==0?-(1.6+c()*2)" in worker
+    assert "(e.speed||0)<4&&t===1?-(1.6+r()*2)" in main
+    assert "(t.speed||0)<4&&r===1?-(1.6+c()*2)" in worker
+    assert "(e.speed||0)<4&&t%5==0" not in main
+    assert "(t.speed||0)<4&&r%5==0" not in worker
     assert "⚠️ Flat LLM" not in main
     assert "id:`semif`" in main and "id:`heuristic`" in main
     assert "https://github.com/EndeavorYen/SemIf" in main
