@@ -87,6 +87,71 @@
     if (typeof sim.rerouteIfNeeded === "function") sim.rerouteIfNeeded();
   }
 
+  const LATERAL_KP = 0.45;
+  const LATERAL_KD = 0.15;
+  const LATERAL_PD_LIMIT = 0.12;
+  const DETOUR_STEER = 0.28;
+
+  function lateralPd(uSelected, offsetM, offsetDot) {
+    const u = Number(uSelected) || 0;
+    if (Math.abs(u) > DETOUR_STEER) {
+      return Math.max(-0.85, Math.min(0.85, u));
+    }
+    let pd = LATERAL_KP * offsetM + LATERAL_KD * offsetDot;
+    if (pd > LATERAL_PD_LIMIT) pd = LATERAL_PD_LIMIT;
+    else if (pd < -LATERAL_PD_LIMIT) pd = -LATERAL_PD_LIMIT;
+    return Math.max(-0.85, Math.min(0.85, u - pd));
+  }
+
+  function laneOffsetM(sim) {
+    const lane =
+      (sim.lastDecisionState && sim.lastDecisionState.lane) ||
+      (sim.lastPlan && sim.lastPlan.lane);
+    if (lane && typeof lane.offset_m === "number" && Number.isFinite(lane.offset_m)) {
+      return lane.offset_m;
+    }
+    return null;
+  }
+
+  function applyLateralPd(sim, dt) {
+    const p = sim && sim.player;
+    if (!p || !sim.autopilot || sim.paused || sim.crash) return;
+    const measured = laneOffsetM(sim);
+    if (measured == null) return;
+    const step = Math.min(Math.max(Number(dt) || 0.016, 0), 0.05);
+    if (sim._pdPrevE == null) {
+      sim._pdPrevE = measured;
+      sim._pdDot = 0;
+    } else if (measured !== sim._pdPrevE) {
+      sim._pdDot = (measured - sim._pdPrevE) / Math.max(step, 0.05);
+      sim._pdPrevE = measured;
+    } else {
+      sim._pdDot *= 0.85;
+    }
+    const e = measured;
+    const eDot = sim._pdDot;
+    const src = p.maneuver;
+    if (src && src._pdCaptured !== true) {
+      src._pdCaptured = true;
+      src._pdSelSteer = Number.isFinite(src.steering) ? src.steering : Number(p.steering) || 0;
+      src._pdSelOff = Number.isFinite(src.lane_offset_m) ? src.lane_offset_m : null;
+    }
+    const uSel =
+      src && src._pdCaptured ? src._pdSelSteer : Number(p.steering) || 0;
+    if (src && src._pdSelOff != null && Math.abs(src._pdSelOff) > 0.45) return;
+    const u = lateralPd(uSel, e, eDot);
+    p.steering = u;
+    if (src) {
+      src.steering = u;
+      if (src._pdSelOff != null) {
+        let corr = LATERAL_KP * e + LATERAL_KD * eDot;
+        if (corr > 0.25) corr = 0.25;
+        else if (corr < -0.25) corr = -0.25;
+        src.lane_offset_m = src._pdSelOff - corr;
+      }
+    }
+  }
+
   function applyRawMode(on) {
     window.SEMIF_RAW_MODE = !!on;
     const sim = window.SEMIF_SIM;
@@ -355,6 +420,11 @@
         applyRawMode(window.SEMIF_RAW_MODE);
         const orig = sim.step.bind(sim);
         sim.step = function (dt) {
+          try {
+            applyLateralPd(sim, dt);
+          } catch (_err) {
+            /* PD must not kill the drive loop */
+          }
           let out;
           try {
             out = orig(dt);

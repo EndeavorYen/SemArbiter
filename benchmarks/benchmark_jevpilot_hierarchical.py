@@ -33,6 +33,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from demo.server import DecisionEngine
+from semif_phase1.lateral import lateral_pd
 from semif_phase1.trajectory_sampler import (
     VECTOR_INSTRUCTIONS,
     candidates_as_vecs,
@@ -329,6 +330,8 @@ class JevPilot2Simulator:
         self.speed_mps = max(0.0, self.speed_mps + accel * self.dt)
         self.speeds.append(self.speed_mps)
 
+        offset_dot = self.steer_angle * self.speed_mps * 2.0
+        target_steer = lateral_pd(float(target_steer), self.x, offset_dot)
         steer_delta = abs(target_steer - self.steer_angle)
         self.steering_deltas.append(steer_delta)
         self.steer_angle += (target_steer - self.steer_angle) * 6.0 * self.dt

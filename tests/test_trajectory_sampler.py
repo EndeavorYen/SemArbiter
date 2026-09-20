@@ -1,6 +1,7 @@
 import inspect
 
 from semif_phase1.trajectory_sampler import (
+    CENTER_ABS_M,
     PLAN_POINTS,
     STEER_LIMIT,
     VECTOR_COLUMNS,
@@ -27,6 +28,22 @@ def test_vector_option_tag_is_short():
     assert "illegal" not in halt_red
     verbose = vector_option_tag([16.2, -0.14, 0.3, 0.0, False, True], style="verbose")
     assert "stop_at_line True" in verbose
+
+
+def test_center_tag_survives_deadband_when_end_x_near_zero():
+    """#113: |ego_x|=0.03 m is inside the old relative deadband.
+
+    A trajectory that ends within 0.08 m of center must still be tagged
+    center, otherwise the model sees only hold and wanders.
+    """
+    assert CENTER_ABS_M == 0.08
+    near = vector_option_tag([16.0, 0.0, 0.01, 0.0, False, False], style="words", ego_x=0.03)
+    at_gate = vector_option_tag([16.0, 0.0, 0.08, 0.0, False, False], style="words", ego_x=0.03)
+    just_out = vector_option_tag([16.0, 0.04, 0.12, 0.0, False, False], style="words", ego_x=0.03)
+    assert "center" in near
+    assert "center" in at_gate
+    assert "center" not in just_out
+    assert "diverge" not in near
 
 
 def test_compact_state_drops_candidates():
