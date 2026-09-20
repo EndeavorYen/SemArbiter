@@ -16,7 +16,11 @@
     <div id="fsd-halo" aria-hidden="true"></div>
     <div id="fsd-boxes"></div>
     <div id="fsd-status" aria-live="polite">
-      <span id="fsd-seed"></span>
+      <label id="fsd-seed-box">seed
+        <input id="fsd-seed-input" type="number" min="0" max="999999" step="1" />
+      </label>
+      <button type="button" id="fsd-seed-apply">Apply</button>
+      <button type="button" id="fsd-seed-rand">Random</button>
       <span id="fsd-intent">SemIf</span>
       <span id="fsd-vision">VISION off</span>
     </div>
@@ -25,11 +29,29 @@
 
   const halo = document.getElementById("fsd-halo");
   const boxes = document.getElementById("fsd-boxes");
-  const seedEl = document.getElementById("fsd-seed");
+  const seedInput = document.getElementById("fsd-seed-input");
   const visionEl = document.getElementById("fsd-vision");
   const intentEl = document.getElementById("fsd-intent");
   const visionOn = params.get("vision") !== "0";
   window.SEMIF_VISION = null;
+
+  function reloadWithSeed(seed) {
+    const q = new URLSearchParams(location.search);
+    q.set("seed", String(Math.max(0, Math.floor(Number(seed) || 0) % 1000000));
+    const world = document.getElementById("world-select");
+    if (world && world.value) q.set("world", world.value);
+    location.search = q.toString();
+  }
+
+  document.getElementById("fsd-seed-apply").addEventListener("click", () => {
+    reloadWithSeed(seedInput.value);
+  });
+  document.getElementById("fsd-seed-rand").addEventListener("click", () => {
+    reloadWithSeed(Math.floor(Math.random() * 999999));
+  });
+  seedInput.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") reloadWithSeed(seedInput.value);
+  });
 
   function applyRawMode(on) {
     window.SEMIF_RAW_MODE = !!on;
@@ -311,11 +333,25 @@
           } catch (_err) {
             /* HUD ghosts must not kill the drive loop */
           }
+          try {
+            const p = sim.player;
+            const slow = p && Number.isFinite(p.speed) && Math.abs(p.speed) < 0.45;
+            if (sim.autopilot && slow) {
+              sim._stuckSince = sim._stuckSince == null ? sim.time : sim._stuckSince;
+              const stuck = sim.time - sim._stuckSince;
+              if (stuck > 3.5 && p.target >= 0) p.target = -4;
+              if (stuck > 7 && typeof sim.requestReroute === "function") sim.requestReroute();
+            } else {
+              sim._stuckSince = null;
+            }
+          } catch (_err) {
+            /* unstick must not kill the drive loop */
+          }
           return out;
         };
       }
       const seed = sim.world && sim.world.seed;
-      seedEl.textContent = seed != null ? `seed ${seed}` : "";
+      if (seed != null && document.activeElement !== seedInput) seedInput.value = String(seed);
       drawBoxes(sim, world);
     }
     requestAnimationFrame(tick);
