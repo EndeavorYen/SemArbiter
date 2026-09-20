@@ -109,7 +109,8 @@ def test_fsd_overlay_assets_present():
     assert "_steerEma" not in js
     assert "fsd-seed-apply" in js
     assert "reloadWithSeed" in js
-    assert "p.target = -4" in js
+    assert "p.target = -4" not in js
+    assert "_stuckSince" not in js
 
 
 def test_bundle_hooks_raw_mode_and_sim():

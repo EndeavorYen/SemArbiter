@@ -333,20 +333,6 @@
           } catch (_err) {
             /* HUD ghosts must not kill the drive loop */
           }
-          try {
-            const p = sim.player;
-            const slow = p && Number.isFinite(p.speed) && Math.abs(p.speed) < 0.45;
-            if (sim.autopilot && slow) {
-              sim._stuckSince = sim._stuckSince == null ? sim.time : sim._stuckSince;
-              const stuck = sim.time - sim._stuckSince;
-              if (stuck > 3.5 && p.target >= 0) p.target = -4;
-              if (stuck > 7 && typeof sim.requestReroute === "function") sim.requestReroute();
-            } else {
-              sim._stuckSince = null;
-            }
-          } catch (_err) {
-            /* unstick must not kill the drive loop */
-          }
           return out;
         };
       }
