@@ -2,19 +2,47 @@
 
 from __future__ import annotations
 
+import math
+
 from semif_phase1.trajectory_sampler import STEER_LIMIT
 
 LATERAL_KP = 0.45  # rad per meter of lane offset
 LATERAL_KD = 0.15  # rad per m/s of offset rate
-LATERAL_PD_LIMIT = 0.12  # max |correction| so a detour still wins
+LATERAL_PD_LIMIT = 0.20  # max |correction| so a detour still wins
 DETOUR_STEER = 0.28  # skip PD when the selected steer is already a lane change
 # Web sampler: t<14 ±0.1 m, t<30 ±0.65 m, else ±1.35 m. A() holds that offset.
 LANE_KEEP_OFFSET_M = 1.4
 LOOKAHEAD_MIN_M = 4.0
 LOOKAHEAD_MAX_M = 8.0
 LOOKAHEAD_S = 0.45  # seconds of path A() should look ahead (city scale)
-YAW_KD = 0.25  # rad per (rad/s) of yaw, damps Stanley weave
+YAW_KD = 0.08  # light yaw damp; 0.25 fought the centering turn
 STEER_SLEW = 0.9  # rad/s cap on the command into w()
+
+
+def signed_lane_offset(px: float, pz: float, qx: float, qz: float, heading: float) -> float:
+    """Right-positive cross-track. Heading 0 is -Z, same as the Web bicycle."""
+    return (float(px) - float(qx)) * math.cos(heading) + (float(pz) - float(qz)) * math.sin(heading)
+
+
+def closest_segment_offset(
+    px: float,
+    pz: float,
+    ax: float,
+    az: float,
+    bx: float,
+    bz: float,
+    heading: float | None = None,
+) -> float:
+    """Project (px,pz) onto segment ab, then signed lateral vs heading."""
+    abx = float(bx) - float(ax)
+    abz = float(bz) - float(az)
+    length2 = abx * abx + abz * abz or 1.0
+    t = ((float(px) - float(ax)) * abx + (float(pz) - float(az)) * abz) / length2
+    t = max(0.0, min(1.0, t))
+    qx = float(ax) + abx * t
+    qz = float(az) + abz * t
+    h = heading if heading is not None else math.atan2(abx, -abz)
+    return signed_lane_offset(px, pz, qx, qz, h)
 
 
 def lane_keep_pursuit_offset(selected_offset_m):

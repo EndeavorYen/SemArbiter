@@ -90,13 +90,13 @@
   const STEER_LIMIT = 0.85;
   const LATERAL_KP = 0.45;
   const LATERAL_KD = 0.15;
-  const LATERAL_PD_LIMIT = 0.12;
+  const LATERAL_PD_LIMIT = 0.20;
   const DETOUR_STEER = 0.28;
   const LANE_KEEP_OFFSET_M = 1.4;
   const LOOKAHEAD_MIN_M = 4.0;
   const LOOKAHEAD_MAX_M = 8.0;
   const LOOKAHEAD_S = 0.45;
-  const YAW_KD = 0.25;
+  const YAW_KD = 0.08;
   const STEER_SLEW = 0.9;
 
   function clipSteer(u) {
@@ -153,11 +153,50 @@
     return null;
   }
 
+  function realtimeLaneOffsetM(sim) {
+    const p = sim && sim.player;
+    const route = p && p.route && p.route.points;
+    if (!p || !route || route.length < 2) {
+      const snap = laneOffsetM(sim);
+      return snap == null ? 0 : snap;
+    }
+    const s0 = Number.isFinite(p.s) ? p.s : null;
+    let best = null;
+    let bestD2 = Infinity;
+    for (let i = 0; i < route.length - 1; i++) {
+      const a = route[i];
+      const b = route[i + 1];
+      if (s0 != null && a.s != null && a.s < s0 - 12) continue;
+      if (s0 != null && a.s != null && a.s > s0 + 32) break;
+      const abx = b.x - a.x;
+      const abz = b.z - a.z;
+      const len2 = abx * abx + abz * abz || 1;
+      let t = ((p.x - a.x) * abx + (p.z - a.z) * abz) / len2;
+      if (t < 0) t = 0;
+      else if (t > 1) t = 1;
+      const qx = a.x + abx * t;
+      const qz = a.z + abz * t;
+      const dx = p.x - qx;
+      const dz = p.z - qz;
+      const d2 = dx * dx + dz * dz;
+      if (d2 < bestD2) {
+        bestD2 = d2;
+        const h = Number.isFinite(a.heading) ? a.heading : Math.atan2(abx, -abz);
+        best = dx * Math.cos(h) + dz * Math.sin(h);
+      }
+    }
+    if (best == null) {
+      const snap = laneOffsetM(sim);
+      return snap == null ? 0 : snap;
+    }
+    return best;
+  }
+
   window.SEMIF_APPLY_STEER = function (player, u) {
     const sim = window.SEMIF_SIM;
     if (!sim || !sim.autopilot || sim.paused || sim.crash || !player) return u;
     const dt = Math.min(Math.max(Number(sim._pdDt) || 0.016, 0.008), 0.05);
-    const offset = laneOffsetM(sim) || 0;
+    const offset = realtimeLaneOffsetM(sim);
     const prevOff = sim._lastOffset;
     const offsetDot = prevOff == null ? 0 : (offset - prevOff) / dt;
     sim._lastOffset = offset;

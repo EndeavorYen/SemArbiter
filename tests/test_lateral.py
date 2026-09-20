@@ -16,10 +16,12 @@ from semif_phase1.lateral import (
     STEER_SLEW,
     YAW_KD,
     apply_steer_command,
+    closest_segment_offset,
     dampen_stanley_steer,
     lane_keep_maneuver,
     lane_keep_pursuit_offset,
     lateral_pd,
+    signed_lane_offset,
 )
 
 OVERLAY_JS = Path("demo/jevpilot/semif-layer.js")
@@ -36,6 +38,23 @@ CONTROL_CONSTS = (
     "YAW_KD",
     "STEER_SLEW",
 )
+
+
+def test_signed_lane_offset_is_right_positive_at_heading_zero():
+    assert signed_lane_offset(0.25, -10.0, 0.0, -10.0, 0.0) == 0.25
+    assert signed_lane_offset(-0.1, -10.0, 0.0, -10.0, 0.0) == -0.1
+
+
+def test_closest_segment_offset_projects_onto_the_line():
+    # Segment along -Z (heading 0). Point 0.3 m to the right, past the start.
+    assert abs(closest_segment_offset(0.3, -5.0, 0.0, 0.0, 0.0, -10.0, 0.0) - 0.3) < 1e-9
+
+
+def test_yaw_kd_does_not_cancel_a_centering_steer():
+    """YAW_KD 0.25 fought the return-to-center yaw. Keep it light."""
+    assert 0.05 <= YAW_KD <= 0.10
+    u = dampen_stanley_steer(-0.12, yaw_rate=-0.4, prev_u=-0.12, dt=1.0 / 60.0)
+    assert u < 0.0
 
 
 def test_pd_opposes_right_offset():
@@ -188,6 +207,8 @@ def test_overlay_live_steer_hook_calls_stacked_command():
     assert "function applyLaneKeepReference" in js
     steer_fn = js.split("window.SEMIF_APPLY_STEER")[1].split("function applyLaneKeepReference")[0]
     assert "applySteerCommand(" in steer_fn
+    assert "realtimeLaneOffsetM(" in steer_fn
+    assert "laneOffsetM(sim) || 0" not in steer_fn
     keep_fn = js.split("function applyLaneKeepReference")[1].split("function applyRawMode")[0]
     assert "applySteerCommand(" not in keep_fn
     assert "lateralPd(" not in keep_fn
