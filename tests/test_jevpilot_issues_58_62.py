@@ -91,10 +91,17 @@ def test_fsd_overlay_assets_present():
     assert "semif-layer.js" in html
     assert "SEMIF_RAW_MODE" in html
     assert "--fsd-blue" in css
-    assert "fsd-pill" in css and "fsd-drawer" in css
+    assert "simple-jev-api-badge" in css and "display: none" in css
+    assert "fsd-status" in css
+    assert "fsd-pill" not in css and "fsd-drawer" not in css
     assert "injectFrustumEvents" in js
+    assert "sim.pedestrians.push" not in js
+    assert "sim.traffic.push" not in js
+    assert "fsd-status" in js
     assert "project(" in js
-    assert "Raw decision" in js
+    assert "Raw decision" not in js
+    assert "fillJevAnswers" in js
+    assert "answers.motion" in js
 
 
 def test_bundle_hooks_raw_mode_and_sim():
@@ -102,11 +109,26 @@ def test_bundle_hooks_raw_mode_and_sim():
     worker = (JEV / "assets" / "planner.worker-DFdG3q6n.js").read_text(encoding="utf-8")
     assert "Q=window.SEMIF_SIM=new cn(" in main
     assert "window.SEMIF_SIM=Q=new cn(" not in main
+    assert "var window.SEMIF_SIM" not in main
     assert "var Hh=window.SEMIF_WORLD=new uh(" in main
+    index = (JEV / "assets" / "index-DC8fTtby.js").read_text(encoding="utf-8")
+    html = (JEV / "index.html").read_text(encoding="utf-8")
+    assert "assets/main-CvLEeHjW.js?v=" in index
+    assert "import(`./main-CvLEeHjW.js?v=" in index
+    assert "?v=" in html
     assert "rawMode:t.rawMode" in main
     assert "l=!1&&O&&r<8?{x:w.x" in worker
     assert "28+(t===`city`?24:0)" in main
     assert "28+(t===`city`?24:0)" in worker
+    assert "⚠️ Flat LLM" not in main
+    assert "id:`semif`" in main and "id:`heuristic`" in main
+    assert "https://github.com/EndeavorYen/SemIf" in main
+    assert "https://standardagents.ai/" not in main
+    assert "Digit2`&&cg(`raw_flat`)" not in main
+    assert "if(!t){t=lh(e)" in main
+    assert "Next destination" in main
+    assert "j<.15?(t%4==0?-(1.6+r()*2):0)" in main
+    assert "A<.15?(r%4==0?-(1.6+c()*2):0)" in worker
 
 
 def test_semantic_exclusive_intents(engine):

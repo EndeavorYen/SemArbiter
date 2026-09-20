@@ -99,6 +99,10 @@ def test_fastapi_endpoints(mock_engine):
     pdata = post_resp.json()
     assert pdata["action"] in ACTION_IDS
 
+    js_resp = client.get("/jevpilot/assets/index-DC8fTtby.js")
+    assert js_resp.status_code == 200
+    assert "no-cache" in js_resp.headers.get("cache-control", "").lower()
+
 
 def test_websocket_stream_decide(mock_engine):
     client = TestClient(app)
@@ -152,6 +156,46 @@ def test_v1_classifier_endpoint(mock_engine):
     assert "usage" in data
     assert "meta" in data
     assert data["meta"]["hierarchical"] is False
+
+
+def test_v1_classifier_answers_web_motion_contract(mock_engine):
+    """3D client se() requires motion drive|stop plus vector over moving vN ids."""
+    client = TestClient(app)
+    req_body = {
+        "model": "SemIf/Qwen2.5-3B-Instruct",
+        "mode": "flat",
+        "state": {
+            "speed_mps": 12.0,
+            "on_road": True,
+            "candidates": {
+                "v0": [12.0, 0.0, 0.1, 0.0, False, False],
+                "v1": [8.0, -0.1, 0.2, 0.0, False, False],
+            },
+        },
+        "questions": {
+            "motion": {
+                "type": "choice",
+                "instructions": "Drive includes slowing; stop means zero target now.",
+                "criteria": {"drive": None, "stop": None},
+            },
+            "vector": {
+                "type": "choice",
+                "instructions": "Choose a safe driving path.",
+                "criteria": {"v0": None, "v1": None},
+            },
+        },
+    }
+    resp = client.post("/v1/classifier", json=req_body)
+    assert resp.status_code == 200
+    data = resp.json()
+    motion = data["answers"]["motion"]
+    vector = data["answers"]["vector"]
+    assert motion["choice"] == "drive"
+    assert set(motion["probabilities"]) == {"drive", "stop"}
+    assert vector["choice"] in {"v0", "v1"}
+    assert set(vector["probabilities"]) == {"v0", "v1"}
+    assert all(0.0 <= p <= 1.0 for p in motion["probabilities"].values())
+    assert all(0.0 <= p <= 1.0 for p in vector["probabilities"].values())
 
 
 def test_v1_classifier_red_light_compliance(mock_engine):

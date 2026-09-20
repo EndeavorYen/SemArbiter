@@ -209,6 +209,8 @@ class DecisionEngine:
         self.tokenizer = None
         self.device = None
         self.graph_runner = None
+        self._vis_proj = None
+        self._vis_null_priors: Dict[int, List[float]] = {}
         self.prior_logits: List[float] = DEFAULT_5OPT_PRIOR
         self.priors_by_n: Dict[int, List[float]] = {len(DEFAULT_5OPT_PRIOR): list(DEFAULT_5OPT_PRIOR)}
         self.stats = {
@@ -294,6 +296,56 @@ class DecisionEngine:
             return logits
         except Exception as e:
             logger.warning(f"Failed to calibrate {n}-option null prior: {e}")
+            return None
+
+    def _visual_prefix_from_state(self, state: Any):
+        from semif_phase1.visual_prefix import VisualPrefixProjector, uses_visual_prefix
+        from semif_phase1.vision import get_vision_encoder
+
+        vision = state.get("vision") if isinstance(state, dict) else None
+        if not uses_visual_prefix(vision):
+            return None
+        encoder = get_vision_encoder()
+        patches = encoder.last_patches
+        if patches is None:
+            return None
+        hidden = int(self.model.config.hidden_size)
+        in_dim = int(patches.shape[-1])
+        device = next(self.model.parameters()).device
+        dtype = next(self.model.parameters()).dtype
+        if self._vis_proj is None or self._vis_proj.in_dim != in_dim or self._vis_proj.out_dim != hidden:
+            self._vis_proj = VisualPrefixProjector(in_dim, hidden, device, dtype)
+        return self._vis_proj(patches)
+
+    def _visual_null_prior(self, n: int, row: Dict[str, Any]) -> Optional[List[float]]:
+        cached = self._vis_null_priors.get(n)
+        if cached is not None and len(cached) == n:
+            return cached
+        from semif_phase1.vision import get_vision_encoder
+
+        encoder = get_vision_encoder()
+        blank = encoder.null_patches()
+        if blank is None or self._vis_proj is None:
+            return None
+        prefix = self._vis_proj(blank)
+        try:
+            res = score(
+                self.model,
+                self.tokenizer,
+                null_prompt_row(options_count=n),
+                {},
+                sliced_head=True,
+                prior_logits=None,
+                graph_runner=None,
+                visual_prefix=prefix,
+            )
+            logits = list(res["option_logits"])
+            if len(logits) != n:
+                return None
+            self._vis_null_priors[n] = logits
+            return logits
+        except Exception as exc:
+            logger.warning(f"Visual null prior failed: {exc}")
             return None
 
     def build_driving_row(self, telemetry: Dict[str, Any]) -> Dict[str, Any]:
@@ -627,21 +679,31 @@ class DecisionEngine:
             "question": instructions,
             "options": options,
         }
+        visual_prefix = self._visual_prefix_from_state(state)
+        vis_prior = None
+        if visual_prefix is not None:
+            vis_prior = self._visual_null_prior(len(options), row)
         scored = score(
             self.model,
             self.tokenizer,
             row,
             {},
             sliced_head=True,
-            prior_logits=prior,
-            graph_runner=self.graph_runner,
+            prior_logits=vis_prior if vis_prior is not None else prior,
+            graph_runner=None if visual_prefix is not None else self.graph_runner,
+            visual_prefix=visual_prefix,
         )
+        from semif_phase1.gating import compute_free_energy
+
+        energy = compute_free_energy(scored["calibrated_logits"])
         probs = {opt["id"]: p for opt, p in zip(options, scored["probabilities"])}
         chosen_idx = max(range(len(scored["probabilities"])), key=scored["probabilities"].__getitem__)
         return {
             "choice": options[chosen_idx]["id"],
             "probabilities": probs,
             "input_tokens": scored.get("input_tokens", 150),
+            "visual_prefix_tokens": scored.get("visual_prefix_tokens", 0),
+            "vision_free_energy": energy,
         }
 
     def _mock_branch_choice(self, question: str, options: List[Dict[str, str]], evidence: Dict[str, Any]) -> str:
@@ -797,6 +859,7 @@ class DecisionEngine:
                 "probabilities": self._mock_probs(["explain"], "explain"),
             }
 
+        visual_meta: Dict[str, Any] = {}
         for q_key, q_data in questions.items():
             instructions = q_data.get("instructions", "Choose optimal driving option.")
             criteria = q_data.get("criteria", {})
@@ -814,6 +877,12 @@ class DecisionEngine:
             if not options:
                 continue
             if q_key == "motion":
+                ids = [o["id"] for o in options]
+                pick = "drive" if "drive" in ids else ids[0]
+                answers[q_key] = {
+                    "choice": pick,
+                    "probabilities": self._mock_probs(ids, pick),
+                }
                 continue
 
             if q_key == "maneuver":
@@ -840,7 +909,14 @@ class DecisionEngine:
                 }
                 continue
 
-            if self.use_mock or self.model is None or mode == "heuristic":
+            n_opts = len(options)
+            can_neural = (
+                not self.use_mock
+                and self.model is not None
+                and mode != "heuristic"
+                and 2 <= n_opts <= 16
+            )
+            if not can_neural:
                 best_choice = options[0]["id"]
                 ranked_candidates = []
 
@@ -899,6 +975,10 @@ class DecisionEngine:
                     "choice": neural_vec["choice"],
                     "probabilities": neural_vec["probabilities"],
                 }
+                visual_meta = {
+                    "visual_prefix_tokens": neural_vec.get("visual_prefix_tokens", 0),
+                    "vision_free_energy": neural_vec.get("vision_free_energy"),
+                }
 
         self.stats["total_decisions"] += 1
 
@@ -924,6 +1004,8 @@ class DecisionEngine:
                 "bound_vector": False,
                 "semif_leaf": mode in {"flat", "semif_hierarchical"},
                 "seed": (state.get("seed") if isinstance(state, dict) else None),
+                "visual_prefix_tokens": visual_meta.get("visual_prefix_tokens", 0),
+                "vision_free_energy": visual_meta.get("vision_free_energy"),
             },
         }
 
@@ -942,6 +1024,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def jevpilot_no_cache(request, call_next):
+    response = await call_next(request)
+    path = request.url.path
+    if path.startswith("/jevpilot") and (
+        path.endswith((".js", ".css", ".html")) or path.endswith("/")
+    ):
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return response
 
 engine: Optional[DecisionEngine] = None
 

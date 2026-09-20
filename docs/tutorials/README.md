@@ -20,3 +20,4 @@
 | **[教程 10](10_jev_vs_classifier_io.md)** | Jev 與傳統分類器（輸入／輸出維度與階層樹退役實證） | Schema 約束 vs 語意解空間、Letter-slot 甜區、Hierarchical 硬剪枝失敗歸因（RTX 5080 GPU 實測）、Typed Action 契約 | [#80](https://github.com/EndeavorYen/SemIf/issues/80) [#79](https://github.com/EndeavorYen/SemIf/issues/79) |
 | **[教程 11](11_jevpilot_latency_accuracy_tradeoff.md)** | JevPilot 延遲與正確度取捨 | 3108 token 撐破 Graph 桶、compact state、words vs csv vs verbose、seed 42 閉環 A/B | [#86](https://github.com/EndeavorYen/SemIf/issues/86) |
 | **[教程 12](12_jevpilot_vision.md)** | JevPilot 視覺輸入 | Canvas → CLIP 零樣本證據 → SemIf 選本幀軌；像素不進 prompt | [#90](https://github.com/EndeavorYen/SemIf/issues/90) [#48](https://github.com/EndeavorYen/SemIf/issues/48) |
+| **[教程 13](13_semif_vision_routes_and_tradeoffs.md)** | SemIf-Vision 多模態路線分析與架構抉擇 | 實測覆盤（未訓練 Patch 前綴性能退化）、雙率語意可供性解耦 vs 原生 VLM vs 專用 Projector 矩陣 | [#48](https://github.com/EndeavorYen/SemIf/issues/48) [#90](https://github.com/EndeavorYen/SemIf/issues/90) |

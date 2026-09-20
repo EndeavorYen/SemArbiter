@@ -67,6 +67,13 @@ def test_sampler_ignores_signal_semantics():
     assert any(s.stop_at_line or s.end_speed < 1.2 for s in red.values())
 
 
+def test_sampler_includes_reverse_when_slow():
+    slow = sample_trajectories(ego_x=0.0, ego_z=10.0, speed=1.0, seed=3)
+    assert any(s.speed < 0 for s in slow.values())
+    fast = sample_trajectories(ego_x=0.0, ego_z=10.0, speed=16.0, seed=3)
+    assert all(s.speed >= 0 for s in fast.values())
+
+
 def test_planner_policy_steer_horizon_and_ceiling():
     assert STEER_LIMIT == 0.85
     assert PLAN_POINTS == 31

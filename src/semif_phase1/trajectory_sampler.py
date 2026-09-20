@@ -45,7 +45,14 @@ _SLIM_OBJECT_KEYS = {
     "construction": ("distance_m", "sign"),
     "other_vehicle": ("distance_m", "arriving"),
     "emergency_vehicle": ("distance_m", "behind", "siren"),
-    "vision": ("backend", "signal", "red", "green", "pedestrian", "vehicle", "construction"),
+    "vision": (
+        "signal",
+        "red",
+        "green",
+        "pedestrian",
+        "vehicle",
+        "construction",
+    ),
 }
 
 
@@ -181,7 +188,7 @@ def rollout(
     crossed_line = False
     for _ in range(PLAN_POINTS):
         accel = max(-12.0, min(6.0, (target_speed - v) * 4.0))
-        v = max(0.0, v + accel * PLAN_DT)
+        v = max(-5.0, v + accel * PLAN_DT)
         steer += (target_steer - steer) * 6.0 * PLAN_DT
         z += v * PLAN_DT
         x += steer * v * PLAN_DT * 2.0
@@ -208,10 +215,15 @@ def rollout(
     }
 
 
-def _speed_fraction(index: int, rng: random.Random) -> float:
-    """Mirror worker mix without required-stop (O) or queue (R) branches."""
+def _speed_fraction(index: int, rng: random.Random, speed: float = 0.0) -> float:
+    """Mirror worker mix without required-stop (O) or queue (R) branches.
+
+    Index 1 is reverse when the car is slow (planning-max < 0.15 analogue).
+    """
     if index == 0:
         return 0.0
+    if index == 1 and speed < 4.0:
+        return -(0.35 + rng.random() * 0.35)
     if index <= 4:
         return 0.25 + rng.random() * 0.30
     if index % 5 == 0:
@@ -248,7 +260,11 @@ def sample_trajectories(
     attempt = 0
     while kept < MAX_SAMPLES and attempt < 40:
         steer = _steer_sample(attempt, rng, current_steer)
-        target_speed = cap * _speed_fraction(attempt, rng)
+        frac = _speed_fraction(attempt, rng, speed)
+        if frac < 0:
+            target_speed = -min(4.0, 1.2 + abs(frac) * 4.0)
+        else:
+            target_speed = cap * frac
         geom = rollout(
             ego_x,
             ego_z,
@@ -265,7 +281,7 @@ def sample_trajectories(
             continue
         sid = f"t{kept:02d}"
         desc = (
-            f"target {target_speed:.1f} m/s, steer {steer:+.2f}, "
+            f"{'reverse ' if target_speed < 0 else ''}target {target_speed:.1f} m/s, steer {steer:+.2f}, "
             f"end_speed {geom['end_speed']:.1f} m/s, end_x {geom['end_x']:.1f} m, "
             f"collision {geom['collision']}, halt_geom {geom['stop_at_line']}"
         )

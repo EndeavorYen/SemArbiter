@@ -1,7 +1,7 @@
-"""Zero-shot visual evidence for JevPilot. Leaves stay sampled trajectories.
+"""Visual evidence for JevPilot. Leaves stay sampled trajectories.
 
-CLIP is the default encoder (small, cached). SigLIP/MobileCLIP load if the
-env var SEMIF_VISION_MODEL points at them. Tests use synthetic labels, not weights.
+Default encoder is SigLIP (#48). Patch tokens (32–64) are a visual prefix for
+the sliced head; compact scores are HUD-only. Tests use synthetic labels.
 """
 
 from __future__ import annotations
@@ -12,7 +12,16 @@ import os
 import time
 from typing import Any, Dict, Optional
 
-VISION_FIELDS = ("backend", "signal", "red", "green", "pedestrian", "vehicle", "construction")
+VISION_FIELDS = (
+    "backend",
+    "signal",
+    "red",
+    "green",
+    "pedestrian",
+    "vehicle",
+    "construction",
+    "prefix_tokens",
+)
 
 _PROMPTS = (
     ("red", "a red traffic light facing the camera"),
@@ -51,6 +60,7 @@ def synthetic_vision(**labels: Any) -> Dict[str, Any]:
         "pedestrian": round(float(labels.get("pedestrian", 0.0)), 3),
         "vehicle": round(float(labels.get("vehicle", 0.0)), 3),
         "construction": round(float(labels.get("construction", 0.0)), 3),
+        "prefix_tokens": 0,
     }
 
 
@@ -110,60 +120,162 @@ def decode_image_bytes(image_b64: str) -> Any:
     return Image.open(io.BytesIO(blob)).convert("RGB")
 
 
+def prefix_count() -> int:
+    raw = os.environ.get("SEMIF_VISION_PATCHES", "32")
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        n = 32
+    return max(32, min(64, n))
+
+
 class VisionEncoder:
     def __init__(self, model_id: Optional[str] = None, device: str = "cpu"):
-        self.model_id = model_id or os.environ.get("SEMIF_VISION_MODEL", "openai/clip-vit-base-patch32")
+        self.model_id = model_id or os.environ.get(
+            "SEMIF_VISION_MODEL",
+            "google/siglip-base-patch16-224",
+        )
         self.device = device
         self.backend = "stub"
         self._model = None
         self._processor = None
+        self._tokenizer = None
+        self._image_proc = None
+        self.last_patches = None
+        self._null_patches = None
         self._load()
 
     def _load(self) -> None:
         try:
             import torch
-            from tokenizers import processors as tok_processors
-            from transformers.models.clip import tokenization_clip as clip_tok
 
-            orig = tok_processors.RobertaProcessing
-
-            def _roberta(sep, cls=None, cls_token=None, trim_offsets=True, add_prefix_space=True, **_kw):
-                token = cls_token if cls_token is not None else cls
-                return orig(sep, token, trim_offsets=trim_offsets, add_prefix_space=add_prefix_space)
-
-            tok_processors.RobertaProcessing = _roberta
-            clip_tok.processors.RobertaProcessing = _roberta
-
-            from transformers import CLIPImageProcessor, CLIPModel, CLIPTokenizer
-
-            tokenizer = CLIPTokenizer.from_pretrained(self.model_id)
-            image_proc = CLIPImageProcessor.from_pretrained(self.model_id)
-            self._tokenizer = tokenizer
-            self._image_proc = image_proc
-            self._model = CLIPModel.from_pretrained(self.model_id)
-            self._model.to(self.device)
-            self._model.eval()
-            self.backend = self.model_id
             self._torch = torch
+            if "clip-vit" in self.model_id and "siglip" not in self.model_id.lower():
+                self._load_clip()
+            else:
+                try:
+                    self._load_auto()
+                except Exception:
+                    if "siglip" in self.model_id.lower():
+                        raise
+                    self._load_clip()
         except Exception:
             self.backend = "stub"
             self._model = None
+            self._processor = None
             self._tokenizer = None
             self._image_proc = None
+            self.last_patches = None
+
+    def _load_auto(self) -> None:
+        from transformers import AutoModel, SiglipImageProcessor
+
+        # AutoProcessor needs SentencePiece; AutoImageProcessor needs torchvision.
+        # Image processor + AutoModel is enough for patch tokens (#48).
+        self._image_proc = SiglipImageProcessor.from_pretrained(self.model_id)
+        self._processor = None
+        try:
+            from transformers import AutoProcessor
+
+            self._processor = AutoProcessor.from_pretrained(self.model_id)
+        except Exception:
+            self._processor = None
+        self._model = AutoModel.from_pretrained(self.model_id)
+        self._model.to(self.device)
+        self._model.eval()
+        self.backend = self.model_id
+
+    def _load_clip(self) -> None:
+        from tokenizers import processors as tok_processors
+        from transformers.models.clip import tokenization_clip as clip_tok
+
+        orig = tok_processors.RobertaProcessing
+
+        def _roberta(sep, cls=None, cls_token=None, trim_offsets=True, add_prefix_space=True, **_kw):
+            token = cls_token if cls_token is not None else cls
+            return orig(sep, token, trim_offsets=trim_offsets, add_prefix_space=add_prefix_space)
+
+        tok_processors.RobertaProcessing = _roberta
+        clip_tok.processors.RobertaProcessing = _roberta
+
+        from transformers import CLIPImageProcessor, CLIPModel, CLIPTokenizer
+
+        self._tokenizer = CLIPTokenizer.from_pretrained(self.model_id)
+        self._image_proc = CLIPImageProcessor.from_pretrained(self.model_id)
+        self._model = CLIPModel.from_pretrained(self.model_id)
+        self._model.to(self.device)
+        self._model.eval()
+        self.backend = self.model_id
+
+    def encode_patches(self, image: Any):
+        """Return [prefix_count, dim] patch tokens. None if the encoder is a stub."""
+        if self._model is None:
+            return None
+        from semif_phase1.visual_prefix import pool_patches
+
+        torch = self._torch
+        pixel = self._pixel_values(image)
+        vision = getattr(self._model, "vision_model", None)
+        if vision is None:
+            return None
+        with torch.no_grad():
+            out = vision(pixel_values=pixel)
+        hidden = getattr(out, "last_hidden_state", None)
+        if hidden is None:
+            hidden = out[0]
+        if hidden.shape[1] > 1:
+            # Drop class token when the sequence is patches+1.
+            maybe_cls = hidden[:, 1:, :]
+            if maybe_cls.shape[1] in {49, 196, 256, 729} or maybe_cls.shape[1] % 7 == 0:
+                hidden = maybe_cls
+        pooled = pool_patches(hidden, prefix_count())
+        return pooled[0].detach()
+
+    def _pixel_values(self, image: Any):
+        torch = self._torch
+        if self._processor is not None:
+            packed = self._processor(images=image, return_tensors="pt")
+            pixel = packed["pixel_values"]
+        else:
+            packed = self._image_proc(images=image, return_tensors="pt")
+            pixel = packed["pixel_values"]
+        return pixel.to(self.device)
+
+    def null_patches(self):
+        if self._null_patches is not None:
+            return self._null_patches
+        from PIL import Image
+
+        blank = Image.new("RGB", (224, 224), (127, 127, 127))
+        self._null_patches = self.encode_patches(blank)
+        return self._null_patches
 
     def infer_pil(self, image: Any) -> Dict[str, Any]:
-        if self._model is None or self._tokenizer is None or self._image_proc is None:
-            return synthetic_vision()
+        patches = self.encode_patches(image)
+        self.last_patches = patches
+        n_prefix = int(patches.shape[0]) if patches is not None else 0
+        if self._model is None:
+            ev = synthetic_vision()
+            ev["prefix_tokens"] = 0
+            return ev
         torch = self._torch
         texts = [text for _key, text in _PROMPTS]
-        text_inputs = self._tokenizer(texts, padding=True, return_tensors="pt")
-        image_inputs = self._image_proc(images=image, return_tensors="pt")
-        inputs = {**text_inputs, **image_inputs}
-        inputs = {key: value.to(self.device) for key, value in inputs.items()}
-        with torch.no_grad():
-            out = self._model(**inputs)
-            probs = out.logits_per_image.softmax(dim=-1)[0].tolist()
-        scores = {key: float(prob) for (key, _prompt), prob in zip(_PROMPTS, probs)}
+        try:
+            if self._processor is not None:
+                inputs = self._processor(text=texts, images=image, padding=True, return_tensors="pt")
+            else:
+                text_inputs = self._tokenizer(texts, padding=True, return_tensors="pt")
+                image_inputs = self._image_proc(images=image, return_tensors="pt")
+                inputs = {**text_inputs, **image_inputs}
+            inputs = {key: value.to(self.device) for key, value in inputs.items()}
+            with torch.no_grad():
+                out = self._model(**inputs)
+                logits = out.logits_per_image
+                probs = logits.softmax(dim=-1)[0].tolist()
+            scores = {key: float(prob) for (key, _prompt), prob in zip(_PROMPTS, probs)}
+        except Exception:
+            scores = {key: 0.0 for key, _prompt in _PROMPTS}
+            scores["clear"] = 1.0
         signal = "unknown"
         if scores["red"] >= 0.28 and scores["red"] >= scores["green"]:
             signal = "red"
@@ -177,6 +289,7 @@ class VisionEncoder:
             "pedestrian": round(scores["pedestrian"], 3),
             "vehicle": round(scores["vehicle"], 3),
             "construction": round(scores["construction"], 3),
+            "prefix_tokens": n_prefix,
         }
 
     def infer_b64(self, image_b64: str) -> Dict[str, Any]:

@@ -4,15 +4,23 @@
   --fsd-blue: #3e6ae1;
   --fsd-blue-glow: rgba(62, 106, 225, 0.55);
   --fsd-ink: #f4f4f5;
-  --fsd-muted: #8b8e96;
-  --fsd-bg: rgba(8, 8, 10, 0.78);
-  --fsd-line: rgba(255, 255, 255, 0.1);
+  --fsd-muted: #9aa3b2;
+  --fsd-bg: rgba(10, 12, 18, 0.82);
+  --fsd-line: rgba(255, 255, 255, 0.12);
 }
 
+html.fsd-theme,
 body.fsd-theme {
-  background: #050506;
+  background: #07080c;
   color: var(--fsd-ink);
   font-family: Inter, "DM Sans", system-ui, sans-serif;
+  --muted: #9aa3b2;
+  --line: rgba(255, 255, 255, 0.12);
+  --blue: #3e6ae1;
+}
+
+body.fsd-theme .simple-jev-api-badge {
+  display: none !important;
 }
 
 body.fsd-theme .glass,
@@ -55,6 +63,42 @@ body.fsd-theme .speed-limit b {
   font-size: 15px;
 }
 
+body.fsd-theme .topbar,
+body.fsd-theme .topbar label,
+body.fsd-theme .topbar select,
+body.fsd-theme .navigation-card strong,
+body.fsd-theme .navigation-card span,
+body.fsd-theme .driver-dock,
+body.fsd-theme .pilot-actions button,
+body.fsd-theme .bottom-hud {
+  color: var(--fsd-ink);
+}
+
+body.fsd-theme .topbar select,
+body.fsd-theme .topbar button,
+body.fsd-theme #github-link {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--fsd-ink);
+  border: 1px solid var(--fsd-line);
+}
+
+body.fsd-theme .topbar select option {
+  background: #12141c;
+  color: #f4f4f5;
+}
+
+body.fsd-theme dialog {
+  background: #12141c;
+  color: #f4f4f5;
+  border: 1px solid var(--fsd-line);
+}
+
+body.fsd-theme dialog p,
+body.fsd-theme dialog span,
+body.fsd-theme dialog a {
+  color: #d5dbe6;
+}
+
 body.fsd-theme .vector-label {
   background: rgba(40, 48, 62, 0.55);
   color: #c5ccd8;
@@ -78,52 +122,6 @@ body.fsd-theme .vector-label.selected {
 
 #fsd-chrome * {
   box-sizing: border-box;
-}
-
-#fsd-gear {
-  pointer-events: none;
-  position: fixed;
-  top: 18px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  gap: 18px;
-  align-items: center;
-  color: var(--fsd-muted);
-  font-weight: 600;
-  letter-spacing: 0.28em;
-  font-size: 13px;
-}
-
-#fsd-gear span[data-active="true"] {
-  color: #fff;
-  text-shadow: 0 0 16px var(--fsd-blue-glow);
-}
-
-#fsd-gear span[data-gear="D"][data-active="true"] {
-  color: var(--fsd-blue);
-}
-
-#fsd-pill {
-  pointer-events: none;
-  position: fixed;
-  top: 48px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--fsd-blue);
-  color: #fff;
-  border-radius: 999px;
-  padding: 8px 16px;
-  font-size: 12px;
-  font-weight: 650;
-  letter-spacing: 0.02em;
-  box-shadow: 0 8px 28px var(--fsd-blue-glow);
-  opacity: 0;
-  transition: opacity 0.2s ease;
-}
-
-#fsd-pill[data-show="true"] {
-  opacity: 1;
 }
 
 #fsd-halo {
@@ -180,139 +178,50 @@ body.fsd-theme .vector-label.selected {
   transform-origin: top center;
 }
 
-#fsd-drawer-toggle,
-#fsd-raw-toggle {
-  pointer-events: auto;
+#fsd-status {
+  pointer-events: none;
   position: fixed;
-  right: 18px;
+  left: 16px;
+  bottom: 108px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  max-width: min(560px, 72vw);
+  padding: 7px 12px;
   background: var(--fsd-bg);
-  color: #fff;
   border: 1px solid var(--fsd-line);
   border-radius: 999px;
-  padding: 8px 12px;
+  color: var(--fsd-ink);
   font-size: 11px;
-  font-weight: 650;
-  cursor: pointer;
-}
-
-#fsd-drawer-toggle {
-  bottom: 108px;
-}
-
-#fsd-raw-toggle {
-  bottom: 148px;
-}
-
-#fsd-raw-toggle[aria-pressed="true"] {
-  background: #7c2d12;
-  border-color: #fb923c;
-}
-
-#fsd-drawer {
-  pointer-events: auto;
-  position: fixed;
-  right: 14px;
-  top: 86px;
-  width: min(340px, calc(100vw - 28px));
-  max-height: calc(100vh - 220px);
-  overflow: auto;
-  background: var(--fsd-bg);
-  border: 1px solid var(--fsd-line);
-  border-radius: 16px;
-  padding: 14px 16px 16px;
-  color: #e5e7eb;
-  transform: translateX(110%);
-  transition: transform 0.22s ease;
-}
-
-#fsd-drawer[data-open="true"] {
-  transform: none;
-}
-
-#fsd-drawer h2 {
-  margin: 0 0 8px;
-  font-size: 13px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--fsd-muted);
-}
-
-#fsd-drawer .fsd-intent {
-  color: #fff;
-  font-size: 16px;
-  font-weight: 700;
-  margin-bottom: 8px;
-}
-
-#fsd-drawer p {
-  color: #cbd5e1;
-  font-size: 12px;
-  line-height: 1.5;
-  margin: 0 0 12px;
-}
-
-#fsd-drawer .fsd-prob {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11px;
-  margin: 4px 0;
-}
-
-#fsd-drawer .fsd-prob b {
-  width: 28px;
-}
-
-#fsd-drawer .fsd-bar {
-  flex: 1;
-  height: 6px;
-  background: #1f2937;
-  border-radius: 99px;
-  overflow: hidden;
-}
-
-#fsd-drawer .fsd-bar i {
-  display: block;
-  height: 100%;
-  background: var(--fsd-blue);
+  letter-spacing: 0.03em;
 }
 
 #fsd-seed {
-  pointer-events: none;
-  position: fixed;
-  left: 18px;
-  bottom: 108px;
   color: var(--fsd-muted);
-  font-size: 11px;
-  letter-spacing: 0.04em;
+}
+
+#fsd-intent {
+  color: #fff;
+  font-weight: 650;
 }
 
 #fsd-vision {
-  pointer-events: none;
-  position: fixed;
-  left: 18px;
-  bottom: 128px;
-  max-width: min(520px, 70vw);
-  color: #d7e2ff;
-  font-size: 11px;
-  letter-spacing: 0.04em;
-  background: var(--fsd-bg);
-  border: 1px solid var(--fsd-line);
-  border-radius: 999px;
-  padding: 6px 12px;
+  color: #c9d4ea;
 }
 
 @media (max-width: 650px) {
   body.fsd-theme .speed-cluster strong {
     font-size: 36px;
   }
-  #fsd-drawer,
-  #fsd-drawer-toggle,
-  #fsd-raw-toggle {
-    right: 10px;
-  }
   #fsd-halo {
     width: 160px;
     bottom: 160px;
+  }
+  #fsd-status {
+    left: 10px;
+    right: 10px;
+    max-width: none;
+    border-radius: 14px;
   }
 }
