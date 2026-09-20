@@ -228,17 +228,11 @@ class JevPilot2Simulator:
                 "siren": True,
             }
 
-        obstacles: List[Dict[str, Any]] = []
-        if self.pedestrian:
-            obstacles.append({"kind": "pedestrian", "x": self.pedestrian["x"], "z": self.pedestrian["z"]})
-        if self.roadside_obstacle:
-            obstacles.append({"kind": "roadside", "x": self.roadside_obstacle["x"], "z": self.roadside_obstacle["z"]})
-        if self.cut_in_vehicle:
-            obstacles.append({"kind": "vehicle", "x": self.cut_in_vehicle["x"], "z": self.cut_in_vehicle["z"]})
-        if self.construction:
-            obstacles.append({"kind": "vehicle", "x": self.construction["x"], "z": self.construction["z"]})
-        if self.other_vehicle:
-            obstacles.append({"kind": "vehicle", "x": self.other_vehicle["x"], "z": self.other_vehicle["z"]})
+        from semif_phase1.ipm import camera_obstacles_from_blobs
+        from semif_phase1.vision import blobs_from_frame, render_scenario_frame
+
+        frame = render_scenario_frame(self.scenario_type, self)
+        obstacles = camera_obstacles_from_blobs(blobs_from_frame(frame))
 
         stop_line_z = None
         if self.intersection:
