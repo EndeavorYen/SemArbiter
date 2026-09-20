@@ -16,15 +16,15 @@ def test_vector_option_tag_is_short():
     csv = vector_option_tag([16.2, -0.14, 0.3, 0.0, False, True], style="csv")
     assert csv == "16.2,-0.14,0.00,0,1"
     words = vector_option_tag([16.2, -0.14, 0.3, 0.0, False, True], style="words")
-    assert "collision=no" in words and "halt=yes" in words
+    assert "clear" in words and "halt" in words
     centering = vector_option_tag([12.0, -0.15, 0.05, 0.0, False, False], style="words", ego_x=0.6)
-    assert "centering" in centering
+    assert "center" in centering
     diverging = vector_option_tag([12.0, 0.25, 0.8, 0.0, False, False], style="words", ego_x=0.2)
-    assert "diverging" in diverging
+    assert "diverge" in diverging
     run_red = vector_option_tag([12.0, 0.0, 0.0, 0.0, False, False], style="words", signal="red")
-    assert "violates_signal=yes" in run_red
+    assert "illegal" in run_red
     halt_red = vector_option_tag([0.0, 0.0, 0.0, 0.0, False, True], style="words", signal="red")
-    assert "violates_signal" not in halt_red
+    assert "illegal" not in halt_red
     verbose = vector_option_tag([16.2, -0.14, 0.3, 0.0, False, True], style="verbose")
     assert "stop_at_line True" in verbose
 

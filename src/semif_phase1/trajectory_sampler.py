@@ -20,7 +20,7 @@ VECTOR_COLUMNS = (
     "collision",
     "stop_at_line",
 )
-VECTOR_INSTRUCTIONS = "Choose a safe, legal, lane-centered path. Prefer halt when the light is red."
+VECTOR_INSTRUCTIONS = "Legal, lane-centered path. Halt if red."
 
 # Keys allowed in the model prompt. Candidates live only as choice options.
 PROMPT_STATE_KEYS = (
@@ -28,12 +28,6 @@ PROMPT_STATE_KEYS = (
     "speed_ceiling_mps",
     "on_road",
     "intersection",
-    "pedestrian",
-    "roadside_obstacle",
-    "construction",
-    "other_vehicle",
-    "emergency_vehicle",
-    "anomaly",
     "vision",
     "directive",
 )
@@ -41,11 +35,6 @@ PROMPT_STATE_KEYS = (
 
 _SLIM_OBJECT_KEYS = {
     "intersection": ("control", "distance_to_line_m", "signal"),
-    "pedestrian": ("distance_m", "lateral_offset_m"),
-    "roadside_obstacle": ("distance_m", "lateral_offset_m"),
-    "construction": ("distance_m", "sign"),
-    "other_vehicle": ("distance_m", "arriving"),
-    "emergency_vehicle": ("distance_m", "behind", "siren"),
     "vision": (
         "event",
         "signal",
@@ -74,7 +63,12 @@ def compact_jev_state(state: Any) -> Dict[str, Any]:
         value = state[key]
         allowed = _SLIM_OBJECT_KEYS.get(key)
         if allowed and isinstance(value, dict):
-            packed[key] = {inner: value[inner] for inner in allowed if inner in value}
+            slim = {inner: value[inner] for inner in allowed if inner in value}
+            if not slim:
+                continue
+            if key == "vision" and isinstance(slim.get("event"), str) and len(slim["event"]) > 96:
+                slim["event"] = slim["event"][:93] + "..."
+            packed[key] = slim
         else:
             packed[key] = value
     if state.get("lateral_offset_m") is not None:
@@ -132,16 +126,14 @@ def vector_option_tag(
         if run_red:
             bits.append("violates_signal=yes")
         return ", ".join(bits)
-    parts = [
-        f"{speed_f:.1f}m/s",
-        f"steer {steer_f:+.2f}",
-    ]
-    if centering:
-        parts.append(centering)
-    parts.append(f"collision={'yes' if hit else 'no'}")
-    parts.append(f"halt={'yes' if halt else 'no'}")
+    short_center = {"centering": "center", "diverging": "diverge", "holding": "hold"}.get(centering, "")
+    parts = [f"{speed_f:.1f}m/s", f"{steer_f:+.2f}"]
+    if short_center:
+        parts.append(short_center)
+    parts.append("hit" if hit else "clear")
+    parts.append("halt" if halt else "go")
     if run_red:
-        parts.append("violates_signal=yes")
+        parts.append("illegal")
     return " ".join(parts)
 
 
