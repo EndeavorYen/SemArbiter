@@ -231,8 +231,11 @@ class JevPilot2Simulator:
         from semif_phase1.ipm import camera_obstacles_from_blobs
         from semif_phase1.vision import blobs_from_frame, render_scenario_frame
 
-        frame = render_scenario_frame(self.scenario_type, self)
-        obstacles = camera_obstacles_from_blobs(blobs_from_frame(frame))
+        if getattr(self, "use_camera_obstacles", True):
+            frame = render_scenario_frame(self.scenario_type, self)
+            obstacles = camera_obstacles_from_blobs(blobs_from_frame(frame))
+        else:
+            obstacles = []
 
         stop_line_z = None
         if self.intersection:
@@ -417,13 +420,17 @@ def run_jevpilot2_episode(
     seed: int,
     raw_mode: bool = False,
     vision_mode: str = "off",
+    on_step: Optional[Any] = None,
+    use_camera_obstacles: bool = True,
 ) -> Dict[str, Any]:
     env = JevPilot2Simulator(scenario, seed=seed, raw_mode=raw_mode)
+    env.use_camera_obstacles = use_camera_obstacles
     latencies = []
     step_count = 0
     decision_interval = 2
 
     chosen_vec = [env.speed_mps, 0.0]
+    chosen_id = "v1"
     is_ood = False
     if vision_mode == "clip":
         from semif_phase1.vision import get_vision_encoder
@@ -473,6 +480,8 @@ def run_jevpilot2_episode(
             is_ood = bool(resp.get("meta", {}).get("true_ood"))
 
         terminated, _ = env.step(chosen_vec, is_ood)
+        if on_step is not None:
+            on_step(env, chosen_id, chosen_vec)
         step_count += 1
         if terminated:
             break
