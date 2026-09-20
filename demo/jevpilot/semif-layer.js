@@ -91,6 +91,7 @@
   const LATERAL_KD = 0.15;
   const LATERAL_PD_LIMIT = 0.12;
   const DETOUR_STEER = 0.28;
+  const LANE_KEEP_OFFSET_M = 0.7;
 
   function lateralPd(uSelected, offsetM, offsetDot) {
     const u = Number(uSelected) || 0;
@@ -101,6 +102,12 @@
     if (pd > LATERAL_PD_LIMIT) pd = LATERAL_PD_LIMIT;
     else if (pd < -LATERAL_PD_LIMIT) pd = -LATERAL_PD_LIMIT;
     return Math.max(-0.85, Math.min(0.85, u - pd));
+  }
+
+  function laneKeepPursuitOffset(selectedOffset) {
+    if (selectedOffset == null || !Number.isFinite(selectedOffset)) return selectedOffset;
+    if (Math.abs(selectedOffset) <= LANE_KEEP_OFFSET_M) return 0;
+    return selectedOffset;
   }
 
   function laneOffsetM(sim) {
@@ -116,6 +123,17 @@
   function applyLateralPd(sim, dt) {
     const p = sim && sim.player;
     if (!p || !sim.autopilot || sim.paused || sim.crash) return;
+    const src = p.maneuver;
+    if (src && src._pdCaptured !== true) {
+      src._pdCaptured = true;
+      src._pdSelSteer = Number.isFinite(src.steering) ? src.steering : Number(p.steering) || 0;
+      src._pdSelOff = Number.isFinite(src.lane_offset_m) ? src.lane_offset_m : null;
+    }
+    if (src && src._pdSelOff != null) {
+      src.lane_offset_m = laneKeepPursuitOffset(src._pdSelOff);
+      if (src.lane_offset_m === 0) src.lane_offset_m = 0;
+      return;
+    }
     const measured = laneOffsetM(sim);
     if (measured == null) return;
     const step = Math.min(Math.max(Number(dt) || 0.016, 0), 0.05);
@@ -128,28 +146,11 @@
     } else {
       sim._pdDot *= 0.85;
     }
-    const e = measured;
-    const eDot = sim._pdDot;
-    const src = p.maneuver;
-    if (src && src._pdCaptured !== true) {
-      src._pdCaptured = true;
-      src._pdSelSteer = Number.isFinite(src.steering) ? src.steering : Number(p.steering) || 0;
-      src._pdSelOff = Number.isFinite(src.lane_offset_m) ? src.lane_offset_m : null;
-    }
     const uSel =
       src && src._pdCaptured ? src._pdSelSteer : Number(p.steering) || 0;
-    if (src && src._pdSelOff != null && Math.abs(src._pdSelOff) > 0.45) return;
-    const u = lateralPd(uSel, e, eDot);
+    const u = lateralPd(uSel, measured, sim._pdDot);
     p.steering = u;
-    if (src) {
-      src.steering = u;
-      if (src._pdSelOff != null) {
-        let corr = LATERAL_KP * e + LATERAL_KD * eDot;
-        if (corr > 0.25) corr = 0.25;
-        else if (corr < -0.25) corr = -0.25;
-        src.lane_offset_m = src._pdSelOff - corr;
-      }
-    }
+    if (src) src.steering = u;
   }
 
   function applyRawMode(on) {

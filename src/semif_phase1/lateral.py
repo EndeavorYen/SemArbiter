@@ -8,6 +8,18 @@ LATERAL_KP = 0.45  # rad per meter of lane offset
 LATERAL_KD = 0.15  # rad per m/s of offset rate
 LATERAL_PD_LIMIT = 0.12  # max |correction| so a detour still wins
 DETOUR_STEER = 0.28  # skip PD when the selected steer is already a lane change
+# Web sampler: t<14 ±0.1 m, t<30 ±0.65 m, else ±1.35 m. A() holds that offset.
+LANE_KEEP_OFFSET_M = 0.7
+
+
+def lane_keep_pursuit_offset(selected_offset_m):
+    """A() tracks this lateral target. Lane-keep snaps to the centerline."""
+    if selected_offset_m is None:
+        return None
+    offset = float(selected_offset_m)
+    if abs(offset) <= LANE_KEEP_OFFSET_M:
+        return 0.0
+    return offset
 
 
 def lateral_pd(
