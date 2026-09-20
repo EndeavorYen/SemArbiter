@@ -49,6 +49,7 @@ def test_compact_state_adds_lane_offset_phrase():
     packed = compact_jev_state({"speed_mps": 10.0, "lateral_offset_m": 0.4})
     assert packed["lane_offset"] == "drifted 0.4m right"
     assert compact_jev_state({"lateral_offset_m": 0.0})["lane_offset"] == "centered"
+    assert "lane_offset" not in compact_jev_state({"lateral_offset_m": 24.5})
 
 
 def test_option_contract_has_no_signal_and_no_stop_coaching():

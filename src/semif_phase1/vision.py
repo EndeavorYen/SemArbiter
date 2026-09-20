@@ -67,37 +67,53 @@ class _BoxAcc:
         }
 
 
+def _bbox_from_mask(mask: Any, width: int, height: int) -> Optional[Dict[str, float]]:
+    import numpy as np
+
+    ys, xs = np.where(mask)
+    if xs.size < 12:
+        return None
+    xmin, xmax = int(xs.min()), int(xs.max())
+    ymin, ymax = int(ys.min()), int(ys.max())
+    bw = max(1, xmax - xmin + 1)
+    bh = max(1, ymax - ymin + 1)
+    return {
+        "cx": (xmin + xmax) / 2.0 / float(width),
+        "cy": (ymin + ymax) / 2.0 / float(height),
+        "w": bw / float(width),
+        "h": bh / float(height),
+        "area": float(xs.size) / float(width * height),
+    }
+
+
 def blobs_from_frame(image: Any) -> Dict[str, Dict[str, float]]:
     """Axis-aligned blobs from RGB pixels. No world coordinates."""
-    rgb = image.convert("RGB")
-    width, height = rgb.size
-    pix = rgb.load()
-    acc = {
-        "light_red": _BoxAcc(),
-        "light_green": _BoxAcc(),
-        "vehicle": _BoxAcc(),
-        "pedestrian": _BoxAcc(),
-        "construction": _BoxAcc(),
+    import numpy as np
+
+    arr = np.asarray(image.convert("RGB"))
+    height, width = arr.shape[0], arr.shape[1]
+    r = arr[:, :, 0]
+    g = arr[:, :, 1]
+    b = arr[:, :, 2]
+    yy = np.arange(height)[:, None]
+    upper = yy < int(height * 0.48)
+    mid = yy > int(height * 0.48)
+    lower = yy > int(height * 0.50)
+    bottom = yy > int(height * 0.55)
+    masks = {
+        "light_red": upper & (r > 180) & (g < 90) & (b < 90),
+        "light_green": upper & (g > 150) & (r < 90) & (b < 90),
+        "construction": mid & (r > 180) & (g > 70) & (g < 190) & (b < 90),
+        "pedestrian": lower & (r < 40) & (g < 40) & (b < 40),
+        "vehicle": bottom
+        & (
+            ((r >= 85) & (r <= 130) & (np.abs(r.astype(int) - g.astype(int)) < 18) & (np.abs(g.astype(int) - b.astype(int)) < 18))
+            | ((r > 160) & (g < 80) & (b < 80))
+        ),
     }
-    for y in range(height):
-        for x in range(width):
-            r, g, b = pix[x, y]
-            if y < int(height * 0.48) and r > 180 and g < 90 and b < 90:
-                acc["light_red"].add(x, y)
-            elif y < int(height * 0.48) and g > 150 and r < 90 and b < 90:
-                acc["light_green"].add(x, y)
-            elif y > int(height * 0.48) and r > 180 and 70 < g < 190 and b < 90:
-                acc["construction"].add(x, y)
-            elif y > int(height * 0.50) and r < 55 and g < 55 and b < 55:
-                acc["pedestrian"].add(x, y)
-            elif y > int(height * 0.55) and (
-                (85 <= r <= 130 and abs(r - g) < 18 and abs(g - b) < 18)
-                or (r > 160 and g < 80 and b < 80)
-            ):
-                acc["vehicle"].add(x, y)
     out: Dict[str, Dict[str, float]] = {}
-    for key, box in acc.items():
-        packed = box.as_dict(width, height)
+    for key, mask in masks.items():
+        packed = _bbox_from_mask(mask, width, height)
         if packed is not None:
             out[key] = packed
     return out

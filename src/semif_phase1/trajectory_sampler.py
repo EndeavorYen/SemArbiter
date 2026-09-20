@@ -77,7 +77,12 @@ def compact_jev_state(state: Any) -> Dict[str, Any]:
         else:
             packed[key] = value
     if state.get("lateral_offset_m") is not None:
-        packed["lane_offset"] = format_lane_offset(state.get("lateral_offset_m"))
+        try:
+            lat = float(state.get("lateral_offset_m"))
+        except (TypeError, ValueError):
+            lat = None
+        if lat is not None and abs(lat) <= 8.0:
+            packed["lane_offset"] = format_lane_offset(lat)
     return packed
 
 
@@ -186,14 +191,29 @@ class Sample:
         }
 
 
-def _hits_obstacle(x: float, z: float, obj: Dict[str, Any], speed: float) -> bool:
-    """Same radii as JevPilot2Simulator.step — prediction must match the loop."""
-    oz = obj.get("z")
-    ox = float(obj.get("x", 0.0) or 0.0)
-    if oz is None:
-        return False
+def _hits_obstacle(
+    x: float,
+    z: float,
+    obj: Dict[str, Any],
+    speed: float,
+    ego_x: float = 0.0,
+    ego_z: float = 0.0,
+) -> bool:
+    """Same radii as JevPilot2Simulator.step — prediction must match the loop.
+
+    Prefer ego-frame rel_x/rel_z from IPM. World x/z is only for unit tests.
+    """
+    if obj.get("rel_z") is not None:
+        ox = float(ego_x) + float(obj.get("rel_x") or 0.0)
+        oz = float(ego_z) + float(obj["rel_z"])
+    else:
+        oz = obj.get("z")
+        ox = float(obj.get("x", 0.0) or 0.0)
+        if oz is None:
+            return False
+        oz = float(oz)
     kind = str(obj.get("kind") or obj.get("type") or "vehicle")
-    dz = float(oz) - z
+    dz = oz - z
     dx = x - ox
     if kind == "pedestrian":
         return abs(dz) < 3.0 and abs(dx) < 1.6 and speed > 2.0
@@ -240,7 +260,7 @@ def rollout(
         if stop_line_z is not None and z >= stop_line_z:
             crossed_line = True
         for obj in obstacles:
-            if _hits_obstacle(x, z, obj, v):
+            if _hits_obstacle(x, z, obj, v, ego_x=ego_x, ego_z=ego_z):
                 collision = True
     stop_at_line = False
     if stop_line_z is not None and (stop_line_z - ego_z) > 0.5:

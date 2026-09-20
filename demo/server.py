@@ -960,6 +960,8 @@ class DecisionEngine:
                 try:
                     if state.get("lateral_offset_m") is not None:
                         ego_x = float(state.get("lateral_offset_m"))
+                        if abs(ego_x) > 8.0:
+                            ego_x = None
                 except (TypeError, ValueError):
                     ego_x = None
                 vis = state.get("vision") if isinstance(state.get("vision"), dict) else {}
