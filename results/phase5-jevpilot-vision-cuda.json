@@ -1,0 +1,700 @@
+{
+  "benchmark": "JevPilot vision vs telemetry (same sampler)",
+  "seed": 42,
+  "mock": false,
+  "model": "Qwen/Qwen2.5-3B-Instruct",
+  "device": "cuda",
+  "timestamp": "2026-09-20 10:02:25",
+  "arms": {
+    "off": {
+      "modes": {
+        "heuristic": {
+          "mode": "heuristic",
+          "total_episodes": 20,
+          "task_completion_rate": 0.65,
+          "collision_rate": 0.2,
+          "pedestrian_casualties": 1,
+          "pedestrian_casualty_rate": 0.05,
+          "vehicle_collisions": 3,
+          "off_track_rate": 0.05,
+          "red_light_violations": 2,
+          "red_light_violation_rate": 0.1,
+          "speeding_violations": 0,
+          "speeding_violation_rate": 0.0,
+          "jerk_rms": 76.81,
+          "avg_speed_mps": 20.77,
+          "latency_p50_ms": 0.04,
+          "latency_p99_ms": 0.08,
+          "driving_quality": {
+            "clean_completion_rate": 0.65,
+            "incident_rate": 0.35,
+            "completed_rate": 0.65,
+            "incidents": {
+              "red_light": 2,
+              "pedestrian": 1,
+              "vehicle": 3,
+              "off_track": 1,
+              "speeding": 0
+            },
+            "jerk_on_clean": 75.85,
+            "ood_recall": 1.0,
+            "ood_false_positive_rate": 0.0,
+            "n_episodes": 20,
+            "n_clean": 13,
+            "n_true_ood": 2
+          },
+          "deprecated_sdi": {
+            "sdi": 0.833,
+            "weights": {
+              "geometric_smoothness": 0.2,
+              "traffic_law_compliance": 0.3,
+              "emergency_avoidance": 0.3,
+              "ood_safety": 0.2
+            },
+            "dimensions": {
+              "geometric_smoothness": 0.4349,
+              "traffic_law_compliance": 0.935,
+              "emergency_avoidance": 0.885,
+              "ood_safety": 1.0
+            },
+            "semantic_exclusive_success": 0.75,
+            "n_episodes": 20,
+            "n_semantic_exclusive": 8
+          },
+          "base_seed": 42,
+          "raw_mode": true,
+          "scenario_breakdown": {
+            "traffic_light_red": {
+              "episodes": 2,
+              "completed": 0,
+              "collisions": 0,
+              "red_light_violations": 2,
+              "pedestrian_casualties": 0,
+              "vehicle_collisions": 0,
+              "fail_safe": 0
+            },
+            "speed_zone_city": {
+              "episodes": 2,
+              "completed": 2,
+              "collisions": 0,
+              "red_light_violations": 0,
+              "pedestrian_casualties": 0,
+              "vehicle_collisions": 0,
+              "fail_safe": 0
+            },
+            "pedestrian_jaywalking": {
+              "episodes": 2,
+              "completed": 1,
+              "collisions": 1,
+              "red_light_violations": 0,
+              "pedestrian_casualties": 1,
+              "vehicle_collisions": 0,
+              "fail_safe": 0
+            },
+            "roadside_parked_hazard": {
+              "episodes": 2,
+              "completed": 2,
+              "collisions": 0,
+              "red_light_violations": 0,
+              "pedestrian_casualties": 0,
+              "vehicle_collisions": 0,
+              "fail_safe": 0
+            },
+            "cut_in_vehicle": {
+              "episodes": 2,
+              "completed": 0,
+              "collisions": 1,
+              "red_light_violations": 0,
+              "pedestrian_casualties": 0,
+              "vehicle_collisions": 1,
+              "fail_safe": 0
+            },
+            "sharp_curve": {
+              "episodes": 2,
+              "completed": 2,
+              "collisions": 0,
+              "red_light_violations": 0,
+              "pedestrian_casualties": 0,
+              "vehicle_collisions": 0,
+              "fail_safe": 0
+            },
+            "sensor_anomaly": {
+              "episodes": 2,
+              "completed": 2,
+              "collisions": 0,
+              "red_light_violations": 0,
+              "pedestrian_casualties": 0,
+              "vehicle_collisions": 0,
+              "fail_safe": 2
+            },
+            "ambiguous_priority": {
+              "episodes": 2,
+              "completed": 2,
+              "collisions": 0,
+              "red_light_violations": 0,
+              "pedestrian_casualties": 0,
+              "vehicle_collisions": 0,
+              "fail_safe": 0
+            },
+            "construction_detour": {
+              "episodes": 2,
+              "completed": 2,
+              "collisions": 0,
+              "red_light_violations": 0,
+              "pedestrian_casualties": 0,
+              "vehicle_collisions": 0,
+              "fail_safe": 0
+            },
+            "emergency_vehicle": {
+              "episodes": 2,
+              "completed": 0,
+              "collisions": 2,
+              "red_light_violations": 0,
+              "pedestrian_casualties": 0,
+              "vehicle_collisions": 2,
+              "fail_safe": 0
+            }
+          }
+        },
+        "flat": {
+          "mode": "flat",
+          "total_episodes": 20,
+          "task_completion_rate": 0.75,
+          "collision_rate": 0.15,
+          "pedestrian_casualties": 1,
+          "pedestrian_casualty_rate": 0.05,
+          "vehicle_collisions": 2,
+          "off_track_rate": 0.0,
+          "red_light_violations": 2,
+          "red_light_violation_rate": 0.1,
+          "speeding_violations": 0,
+          "speeding_violation_rate": 0.0,
+          "jerk_rms": 111.65,
+          "avg_speed_mps": 12.45,
+          "latency_p50_ms": 49.4,
+          "latency_p99_ms": 54.46,
+          "driving_quality": {
+            "clean_completion_rate": 0.75,
+            "incident_rate": 0.25,
+            "completed_rate": 0.75,
+            "incidents": {
+              "red_light": 2,
+              "pedestrian": 1,
+              "vehicle": 2,
+              "off_track": 0,
+              "speeding": 0
+            },
+            "jerk_on_clean": 108.79,
+            "ood_recall": 1.0,
+            "ood_false_positive_rate": 0.0,
+            "n_episodes": 20,
+            "n_clean": 15,
+            "n_true_ood": 2
+          },
+          "deprecated_sdi": {
+            "sdi": 0.8071,
+            "weights": {
+              "geometric_smoothness": 0.2,
+              "traffic_law_compliance": 0.3,
+              "emergency_avoidance": 0.3,
+              "ood_safety": 0.2
+            },
+            "dimensions": {
+              "geometric_smoothness": 0.2643,
+              "traffic_law_compliance": 0.935,
+              "emergency_avoidance": 0.9125,
+              "ood_safety": 1.0
+            },
+            "semantic_exclusive_success": 0.875,
+            "n_episodes": 20,
+            "n_semantic_exclusive": 8
+          },
+          "base_seed": 42,
+          "raw_mode": true,
+          "scenario_breakdown": {
+            "traffic_light_red": {
+              "episodes": 2,
+              "completed": 0,
+              "collisions": 0,
+              "red_light_violations": 2,
+              "pedestrian_casualties": 0,
+              "vehicle_collisions": 0,
+              "fail_safe": 0
+            },
+            "speed_zone_city": {
+              "episodes": 2,
+              "completed": 2,
+              "collisions": 0,
+              "red_light_violations": 0,
+              "pedestrian_casualties": 0,
+              "vehicle_collisions": 0,
+              "fail_safe": 0
+            },
+            "pedestrian_jaywalking": {
+              "episodes": 2,
+              "completed": 1,
+              "collisions": 1,
+              "red_light_violations": 0,
+              "pedestrian_casualties": 1,
+              "vehicle_collisions": 0,
+              "fail_safe": 0
+            },
+            "roadside_parked_hazard": {
+              "episodes": 2,
+              "completed": 2,
+              "collisions": 0,
+              "red_light_violations": 0,
+              "pedestrian_casualties": 0,
+              "vehicle_collisions": 0,
+              "fail_safe": 0
+            },
+            "cut_in_vehicle": {
+              "episodes": 2,
+              "completed": 1,
+              "collisions": 1,
+              "red_light_violations": 0,
+              "pedestrian_casualties": 0,
+              "vehicle_collisions": 1,
+              "fail_safe": 0
+            },
+            "sharp_curve": {
+              "episodes": 2,
+              "completed": 2,
+              "collisions": 0,
+              "red_light_violations": 0,
+              "pedestrian_casualties": 0,
+              "vehicle_collisions": 0,
+              "fail_safe": 0
+            },
+            "sensor_anomaly": {
+              "episodes": 2,
+              "completed": 2,
+              "collisions": 0,
+              "red_light_violations": 0,
+              "pedestrian_casualties": 0,
+              "vehicle_collisions": 0,
+              "fail_safe": 2
+            },
+            "ambiguous_priority": {
+              "episodes": 2,
+              "completed": 2,
+              "collisions": 0,
+              "red_light_violations": 0,
+              "pedestrian_casualties": 0,
+              "vehicle_collisions": 0,
+              "fail_safe": 0
+            },
+            "construction_detour": {
+              "episodes": 2,
+              "completed": 2,
+              "collisions": 0,
+              "red_light_violations": 0,
+              "pedestrian_casualties": 0,
+              "vehicle_collisions": 0,
+              "fail_safe": 0
+            },
+            "emergency_vehicle": {
+              "episodes": 2,
+              "completed": 1,
+              "collisions": 1,
+              "red_light_violations": 0,
+              "pedestrian_casualties": 0,
+              "vehicle_collisions": 1,
+              "fail_safe": 0
+            }
+          }
+        }
+      },
+      "driving_quality": {
+        "benchmark": "Driving quality (clean completion)",
+        "modes": {
+          "heuristic": {
+            "clean_completion_rate": 0.65,
+            "incident_rate": 0.35,
+            "completed_rate": 0.65,
+            "incidents": {
+              "red_light": 2,
+              "pedestrian": 1,
+              "vehicle": 3,
+              "off_track": 1,
+              "speeding": 0
+            },
+            "jerk_on_clean": 75.85,
+            "ood_recall": 1.0,
+            "ood_false_positive_rate": 0.0,
+            "n_episodes": 20,
+            "n_clean": 13,
+            "n_true_ood": 2
+          },
+          "flat": {
+            "clean_completion_rate": 0.75,
+            "incident_rate": 0.25,
+            "completed_rate": 0.75,
+            "incidents": {
+              "red_light": 2,
+              "pedestrian": 1,
+              "vehicle": 2,
+              "off_track": 0,
+              "speeding": 0
+            },
+            "jerk_on_clean": 108.79,
+            "ood_recall": 1.0,
+            "ood_false_positive_rate": 0.0,
+            "n_episodes": 20,
+            "n_clean": 15,
+            "n_true_ood": 2
+          }
+        },
+        "ranking": [
+          "flat",
+          "heuristic"
+        ]
+      }
+    },
+    "synthetic": {
+      "modes": {
+        "heuristic": {
+          "mode": "heuristic",
+          "total_episodes": 20,
+          "task_completion_rate": 0.65,
+          "collision_rate": 0.2,
+          "pedestrian_casualties": 1,
+          "pedestrian_casualty_rate": 0.05,
+          "vehicle_collisions": 3,
+          "off_track_rate": 0.05,
+          "red_light_violations": 2,
+          "red_light_violation_rate": 0.1,
+          "speeding_violations": 0,
+          "speeding_violation_rate": 0.0,
+          "jerk_rms": 76.81,
+          "avg_speed_mps": 20.77,
+          "latency_p50_ms": 0.04,
+          "latency_p99_ms": 0.09,
+          "driving_quality": {
+            "clean_completion_rate": 0.65,
+            "incident_rate": 0.35,
+            "completed_rate": 0.65,
+            "incidents": {
+              "red_light": 2,
+              "pedestrian": 1,
+              "vehicle": 3,
+              "off_track": 1,
+              "speeding": 0
+            },
+            "jerk_on_clean": 75.85,
+            "ood_recall": 1.0,
+            "ood_false_positive_rate": 0.0,
+            "n_episodes": 20,
+            "n_clean": 13,
+            "n_true_ood": 2
+          },
+          "deprecated_sdi": {
+            "sdi": 0.833,
+            "weights": {
+              "geometric_smoothness": 0.2,
+              "traffic_law_compliance": 0.3,
+              "emergency_avoidance": 0.3,
+              "ood_safety": 0.2
+            },
+            "dimensions": {
+              "geometric_smoothness": 0.4349,
+              "traffic_law_compliance": 0.935,
+              "emergency_avoidance": 0.885,
+              "ood_safety": 1.0
+            },
+            "semantic_exclusive_success": 0.75,
+            "n_episodes": 20,
+            "n_semantic_exclusive": 8
+          },
+          "base_seed": 42,
+          "raw_mode": true,
+          "scenario_breakdown": {
+            "traffic_light_red": {
+              "episodes": 2,
+              "completed": 0,
+              "collisions": 0,
+              "red_light_violations": 2,
+              "pedestrian_casualties": 0,
+              "vehicle_collisions": 0,
+              "fail_safe": 0
+            },
+            "speed_zone_city": {
+              "episodes": 2,
+              "completed": 2,
+              "collisions": 0,
+              "red_light_violations": 0,
+              "pedestrian_casualties": 0,
+              "vehicle_collisions": 0,
+              "fail_safe": 0
+            },
+            "pedestrian_jaywalking": {
+              "episodes": 2,
+              "completed": 1,
+              "collisions": 1,
+              "red_light_violations": 0,
+              "pedestrian_casualties": 1,
+              "vehicle_collisions": 0,
+              "fail_safe": 0
+            },
+            "roadside_parked_hazard": {
+              "episodes": 2,
+              "completed": 2,
+              "collisions": 0,
+              "red_light_violations": 0,
+              "pedestrian_casualties": 0,
+              "vehicle_collisions": 0,
+              "fail_safe": 0
+            },
+            "cut_in_vehicle": {
+              "episodes": 2,
+              "completed": 0,
+              "collisions": 1,
+              "red_light_violations": 0,
+              "pedestrian_casualties": 0,
+              "vehicle_collisions": 1,
+              "fail_safe": 0
+            },
+            "sharp_curve": {
+              "episodes": 2,
+              "completed": 2,
+              "collisions": 0,
+              "red_light_violations": 0,
+              "pedestrian_casualties": 0,
+              "vehicle_collisions": 0,
+              "fail_safe": 0
+            },
+            "sensor_anomaly": {
+              "episodes": 2,
+              "completed": 2,
+              "collisions": 0,
+              "red_light_violations": 0,
+              "pedestrian_casualties": 0,
+              "vehicle_collisions": 0,
+              "fail_safe": 2
+            },
+            "ambiguous_priority": {
+              "episodes": 2,
+              "completed": 2,
+              "collisions": 0,
+              "red_light_violations": 0,
+              "pedestrian_casualties": 0,
+              "vehicle_collisions": 0,
+              "fail_safe": 0
+            },
+            "construction_detour": {
+              "episodes": 2,
+              "completed": 2,
+              "collisions": 0,
+              "red_light_violations": 0,
+              "pedestrian_casualties": 0,
+              "vehicle_collisions": 0,
+              "fail_safe": 0
+            },
+            "emergency_vehicle": {
+              "episodes": 2,
+              "completed": 0,
+              "collisions": 2,
+              "red_light_violations": 0,
+              "pedestrian_casualties": 0,
+              "vehicle_collisions": 2,
+              "fail_safe": 0
+            }
+          }
+        },
+        "flat": {
+          "mode": "flat",
+          "total_episodes": 20,
+          "task_completion_rate": 0.65,
+          "collision_rate": 0.25,
+          "pedestrian_casualties": 2,
+          "pedestrian_casualty_rate": 0.1,
+          "vehicle_collisions": 3,
+          "off_track_rate": 0.0,
+          "red_light_violations": 2,
+          "red_light_violation_rate": 0.1,
+          "speeding_violations": 0,
+          "speeding_violation_rate": 0.0,
+          "jerk_rms": 98.87,
+          "avg_speed_mps": 18.25,
+          "latency_p50_ms": 51.11,
+          "latency_p99_ms": 92.47,
+          "driving_quality": {
+            "clean_completion_rate": 0.65,
+            "incident_rate": 0.35,
+            "completed_rate": 0.65,
+            "incidents": {
+              "red_light": 2,
+              "pedestrian": 2,
+              "vehicle": 3,
+              "off_track": 0,
+              "speeding": 0
+            },
+            "jerk_on_clean": 91.42,
+            "ood_recall": 1.0,
+            "ood_false_positive_rate": 0.0,
+            "n_episodes": 20,
+            "n_clean": 13,
+            "n_true_ood": 2
+          },
+          "deprecated_sdi": {
+            "sdi": 0.7988,
+            "weights": {
+              "geometric_smoothness": 0.2,
+              "traffic_law_compliance": 0.3,
+              "emergency_avoidance": 0.3,
+              "ood_safety": 0.2
+            },
+            "dimensions": {
+              "geometric_smoothness": 0.3126,
+              "traffic_law_compliance": 0.935,
+              "emergency_avoidance": 0.8525,
+              "ood_safety": 1.0
+            },
+            "semantic_exclusive_success": 0.625,
+            "n_episodes": 20,
+            "n_semantic_exclusive": 8
+          },
+          "base_seed": 42,
+          "raw_mode": true,
+          "scenario_breakdown": {
+            "traffic_light_red": {
+              "episodes": 2,
+              "completed": 0,
+              "collisions": 0,
+              "red_light_violations": 2,
+              "pedestrian_casualties": 0,
+              "vehicle_collisions": 0,
+              "fail_safe": 0
+            },
+            "speed_zone_city": {
+              "episodes": 2,
+              "completed": 2,
+              "collisions": 0,
+              "red_light_violations": 0,
+              "pedestrian_casualties": 0,
+              "vehicle_collisions": 0,
+              "fail_safe": 0
+            },
+            "pedestrian_jaywalking": {
+              "episodes": 2,
+              "completed": 0,
+              "collisions": 2,
+              "red_light_violations": 0,
+              "pedestrian_casualties": 2,
+              "vehicle_collisions": 0,
+              "fail_safe": 0
+            },
+            "roadside_parked_hazard": {
+              "episodes": 2,
+              "completed": 2,
+              "collisions": 0,
+              "red_light_violations": 0,
+              "pedestrian_casualties": 0,
+              "vehicle_collisions": 0,
+              "fail_safe": 0
+            },
+            "cut_in_vehicle": {
+              "episodes": 2,
+              "completed": 2,
+              "collisions": 0,
+              "red_light_violations": 0,
+              "pedestrian_casualties": 0,
+              "vehicle_collisions": 0,
+              "fail_safe": 0
+            },
+            "sharp_curve": {
+              "episodes": 2,
+              "completed": 2,
+              "collisions": 0,
+              "red_light_violations": 0,
+              "pedestrian_casualties": 0,
+              "vehicle_collisions": 0,
+              "fail_safe": 0
+            },
+            "sensor_anomaly": {
+              "episodes": 2,
+              "completed": 2,
+              "collisions": 0,
+              "red_light_violations": 0,
+              "pedestrian_casualties": 0,
+              "vehicle_collisions": 0,
+              "fail_safe": 2
+            },
+            "ambiguous_priority": {
+              "episodes": 2,
+              "completed": 1,
+              "collisions": 1,
+              "red_light_violations": 0,
+              "pedestrian_casualties": 0,
+              "vehicle_collisions": 1,
+              "fail_safe": 0
+            },
+            "construction_detour": {
+              "episodes": 2,
+              "completed": 2,
+              "collisions": 0,
+              "red_light_violations": 0,
+              "pedestrian_casualties": 0,
+              "vehicle_collisions": 0,
+              "fail_safe": 0
+            },
+            "emergency_vehicle": {
+              "episodes": 2,
+              "completed": 0,
+              "collisions": 2,
+              "red_light_violations": 0,
+              "pedestrian_casualties": 0,
+              "vehicle_collisions": 2,
+              "fail_safe": 0
+            }
+          }
+        }
+      },
+      "driving_quality": {
+        "benchmark": "Driving quality (clean completion)",
+        "modes": {
+          "heuristic": {
+            "clean_completion_rate": 0.65,
+            "incident_rate": 0.35,
+            "completed_rate": 0.65,
+            "incidents": {
+              "red_light": 2,
+              "pedestrian": 1,
+              "vehicle": 3,
+              "off_track": 1,
+              "speeding": 0
+            },
+            "jerk_on_clean": 75.85,
+            "ood_recall": 1.0,
+            "ood_false_positive_rate": 0.0,
+            "n_episodes": 20,
+            "n_clean": 13,
+            "n_true_ood": 2
+          },
+          "flat": {
+            "clean_completion_rate": 0.65,
+            "incident_rate": 0.35,
+            "completed_rate": 0.65,
+            "incidents": {
+              "red_light": 2,
+              "pedestrian": 2,
+              "vehicle": 3,
+              "off_track": 0,
+              "speeding": 0
+            },
+            "jerk_on_clean": 91.42,
+            "ood_recall": 1.0,
+            "ood_false_positive_rate": 0.0,
+            "n_episodes": 20,
+            "n_clean": 13,
+            "n_true_ood": 2
+          }
+        },
+        "ranking": [
+          "heuristic",
+          "flat"
+        ]
+      }
+    }
+  }
+}
