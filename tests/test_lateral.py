@@ -1,5 +1,9 @@
 """Lane-center PD damping for #113. Straight-road envelope, not CUDA evidence."""
 
+import re
+from pathlib import Path
+
+from semif_phase1 import lateral as lat
 from semif_phase1.lateral import (
     LANE_KEEP_OFFSET_M,
     LATERAL_KD,
@@ -8,12 +12,29 @@ from semif_phase1.lateral import (
     LOOKAHEAD_MAX_M,
     LOOKAHEAD_MIN_M,
     LOOKAHEAD_S,
+    STEER_LIMIT,
     STEER_SLEW,
     YAW_KD,
+    apply_steer_command,
     dampen_stanley_steer,
     lane_keep_maneuver,
     lane_keep_pursuit_offset,
     lateral_pd,
+)
+
+OVERLAY_JS = Path("demo/jevpilot/semif-layer.js")
+CONTROL_CONSTS = (
+    "STEER_LIMIT",
+    "LATERAL_KP",
+    "LATERAL_KD",
+    "LATERAL_PD_LIMIT",
+    "DETOUR_STEER",
+    "LANE_KEEP_OFFSET_M",
+    "LOOKAHEAD_MIN_M",
+    "LOOKAHEAD_MAX_M",
+    "LOOKAHEAD_S",
+    "YAW_KD",
+    "STEER_SLEW",
 )
 
 
@@ -146,30 +167,30 @@ def _web_pursuit_peak(*, use_center_ref: bool, seed: int) -> float:
     return peak
 
 
-def test_overlay_applies_pd_not_steer_ema():
-    js = open("demo/jevpilot/semif-layer.js", encoding="utf-8").read()
-    assert "applyLateralPd" in js
-    assert "LANE_KEEP_OFFSET_M" in js
-    assert str(LANE_KEEP_OFFSET_M) in js
-    assert "laneKeepManeuver" in js
-    assert "lookahead_m" in js
-    assert "src.lane_offset_m = 0" in js
-    assert "SEMIF_APPLY_STEER" in js
-    steer_fn = js.split("window.SEMIF_APPLY_STEER")[1].split("function laneOffsetM")[0]
-    assert "lateralPd(" in steer_fn
-    assert "dampenStanleySteer(" in steer_fn
-    apply_fn = js.split("function applyLateralPd")[1].split("function applyRawMode")[0]
-    assert "lateralPd(" not in apply_fn
-    assert "YAW_KD" in js
-    assert "STEER_SLEW" in js
-    assert "dampenStanleySteer" in js
-    assert "LOOKAHEAD_MIN_M" in js
-    assert str(LOOKAHEAD_MIN_M) in js
-    assert str(LOOKAHEAD_MAX_M) in js
-    assert "LATERAL_KP" in js
-    assert str(LATERAL_KP) in js
-    assert str(LATERAL_KD) in js
-    assert str(LATERAL_PD_LIMIT) in js
+def test_apply_steer_command_uses_offset():
+    a = apply_steer_command(0.0, 0.0, 0.0, 0.0, None, 0.016)
+    b = apply_steer_command(0.0, 0.3, 0.0, 0.0, None, 0.016)
+    assert a == 0.0
+    assert b < 0.0
+
+
+def test_overlay_control_constants_match_python():
+    js = OVERLAY_JS.read_text(encoding="utf-8")
+    for name in CONTROL_CONSTS:
+        match = re.search(rf"const {name} = ([0-9.]+);", js)
+        assert match, name
+        assert float(match.group(1)) == float(getattr(lat, name)), name
+
+
+def test_overlay_live_steer_hook_calls_stacked_command():
+    js = OVERLAY_JS.read_text(encoding="utf-8")
+    assert "applyLateralPd" not in js
+    assert "function applyLaneKeepReference" in js
+    steer_fn = js.split("window.SEMIF_APPLY_STEER")[1].split("function applyLaneKeepReference")[0]
+    assert "applySteerCommand(" in steer_fn
+    keep_fn = js.split("function applyLaneKeepReference")[1].split("function applyRawMode")[0]
+    assert "applySteerCommand(" not in keep_fn
+    assert "lateralPd(" not in keep_fn
     assert "_steerEma" not in js
     assert "p.target = -4" not in js
     assert "lateral_offset_m = player.x" not in js

@@ -39,6 +39,23 @@ def lane_keep_maneuver(selected_offset_m, speed_mps: float) -> dict:
     return {"lane_offset_m": 0.0, "lookahead_m": look}
 
 
+def apply_steer_command(
+    u_a: float,
+    offset_m: float,
+    offset_dot: float,
+    yaw_rate: float,
+    prev_u: float | None,
+    dt: float,
+) -> float:
+    """Live Web path: A() output, then lateral PD, then yaw slew. One function."""
+    return dampen_stanley_steer(
+        lateral_pd(u_a, offset_m, offset_dot),
+        yaw_rate,
+        prev_u,
+        dt,
+    )
+
+
 def dampen_stanley_steer(
     u_selected: float,
     yaw_rate: float,
