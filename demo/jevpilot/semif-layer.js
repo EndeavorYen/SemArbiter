@@ -92,6 +92,11 @@
   const LATERAL_PD_LIMIT = 0.12;
   const DETOUR_STEER = 0.28;
   const LANE_KEEP_OFFSET_M = 1.4;
+  const LOOKAHEAD_MIN_M = 10;
+  const LOOKAHEAD_MAX_M = 16;
+  const LOOKAHEAD_S = 0.9;
+  const YAW_KD = 0.25;
+  const STEER_SLEW = 0.9;
 
   function lateralPd(uSelected, offsetM, offsetDot) {
     const u = Number(uSelected) || 0;
@@ -116,9 +121,42 @@
       !Number.isFinite(selectedOffset) ||
       Math.abs(selectedOffset) <= LANE_KEEP_OFFSET_M;
     if (!keep) return { lane_offset_m: selectedOffset, lookahead_m: null };
-    const look = Math.max(6, Math.min(10, 4.5 + 0.36 * Math.abs(Number(speed) || 0)));
+    const look = Math.max(
+      LOOKAHEAD_MIN_M,
+      Math.min(LOOKAHEAD_MAX_M, LOOKAHEAD_S * Math.abs(Number(speed) || 0))
+    );
     return { lane_offset_m: 0, lookahead_m: look };
   }
+
+  function dampenStanleySteer(uSelected, yawRate, prevU, dt) {
+    let u = (Number(uSelected) || 0) - YAW_KD * (Number(yawRate) || 0);
+    const step = Math.max(0.001, Number(dt) || 0.016);
+    if (prevU != null && Number.isFinite(prevU)) {
+      const maxDu = STEER_SLEW * step;
+      const du = u - prevU;
+      if (du > maxDu) u = prevU + maxDu;
+      else if (du < -maxDu) u = prevU - maxDu;
+    }
+    return Math.max(-0.85, Math.min(0.85, u));
+  }
+
+  window.SEMIF_APPLY_STEER = function (player, u) {
+    const sim = window.SEMIF_SIM;
+    if (!sim || !sim.autopilot || sim.paused || sim.crash || !player) return u;
+    const dt = Math.min(Math.max(Number(sim._pdDt) || 0.016, 0.008), 0.05);
+    const heading = Number(player.heading) || 0;
+    let yaw = 0;
+    if (sim._pdHeading != null && Number.isFinite(sim._pdHeading)) {
+      let d = heading - sim._pdHeading;
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      yaw = d / dt;
+    }
+    sim._pdHeading = heading;
+    const out = dampenStanleySteer(u, yaw, sim._pdU, dt);
+    sim._pdU = out;
+    return out;
+  };
 
   function laneOffsetM(sim) {
     const lane =
@@ -143,7 +181,12 @@
       const keep = laneKeepManeuver(src._pdSelOff, p.speed);
       if (keep.lookahead_m != null) {
         src.lane_offset_m = 0;
-        src.lookahead_m = keep.lookahead_m;
+        const speed = Number(p.speed) || 0;
+        if (sim._pdLook == null || Math.abs(speed - (sim._pdLookSpeed || 0)) > 3) {
+          sim._pdLook = keep.lookahead_m;
+          sim._pdLookSpeed = speed;
+        }
+        src.lookahead_m = sim._pdLook;
         return;
       }
       src.lane_offset_m = keep.lane_offset_m;
@@ -436,6 +479,7 @@
         applyRawMode(window.SEMIF_RAW_MODE);
         const orig = sim.step.bind(sim);
         sim.step = function (dt) {
+          sim._pdDt = dt;
           try {
             applyLateralPd(sim, dt);
           } catch (_err) {

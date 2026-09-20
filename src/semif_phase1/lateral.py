@@ -10,6 +10,11 @@ LATERAL_PD_LIMIT = 0.12  # max |correction| so a detour still wins
 DETOUR_STEER = 0.28  # skip PD when the selected steer is already a lane change
 # Web sampler: t<14 ±0.1 m, t<30 ±0.65 m, else ±1.35 m. A() holds that offset.
 LANE_KEEP_OFFSET_M = 1.4
+LOOKAHEAD_MIN_M = 10.0
+LOOKAHEAD_MAX_M = 16.0
+LOOKAHEAD_S = 0.9  # seconds of path A() should look ahead
+YAW_KD = 0.25  # rad per (rad/s) of yaw, damps Stanley weave
+STEER_SLEW = 0.9  # rad/s cap on the command into w()
 
 
 def lane_keep_pursuit_offset(selected_offset_m):
@@ -30,8 +35,27 @@ def lane_keep_maneuver(selected_offset_m, speed_mps: float) -> dict:
     keep = selected_offset_m is None or abs(float(selected_offset_m)) <= LANE_KEEP_OFFSET_M
     if not keep:
         return {"lane_offset_m": float(selected_offset_m), "lookahead_m": None}
-    look = max(6.0, min(10.0, 4.5 + 0.36 * abs(float(speed_mps))))
+    look = max(LOOKAHEAD_MIN_M, min(LOOKAHEAD_MAX_M, LOOKAHEAD_S * abs(float(speed_mps))))
     return {"lane_offset_m": 0.0, "lookahead_m": look}
+
+
+def dampen_stanley_steer(
+    u_selected: float,
+    yaw_rate: float,
+    prev_u: float | None,
+    dt: float,
+) -> float:
+    """Oppose yaw and slew-limit A() output. Not an EMA on player.steer."""
+    u = float(u_selected) - YAW_KD * float(yaw_rate)
+    step = max(1e-3, float(dt))
+    if prev_u is not None:
+        max_du = STEER_SLEW * step
+        du = u - float(prev_u)
+        if du > max_du:
+            u = float(prev_u) + max_du
+        elif du < -max_du:
+            u = float(prev_u) - max_du
+    return max(-STEER_LIMIT, min(STEER_LIMIT, u))
 
 
 def lateral_pd(
