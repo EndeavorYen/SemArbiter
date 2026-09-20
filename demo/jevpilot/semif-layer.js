@@ -57,10 +57,14 @@
           body.state.seed = window.SEMIF_SIM.world.seed;
           body.state.raw_mode = !!window.SEMIF_RAW_MODE;
         }
-        const player = window.SEMIF_SIM && window.SEMIF_SIM.player;
-        if (player && typeof player.x === "number") {
+        const sim = window.SEMIF_SIM;
+        const laneOffset =
+          sim &&
+          ((sim.lastDecisionState && sim.lastDecisionState.lane && sim.lastDecisionState.lane.offset_m) ??
+            (sim.lastPlan && sim.lastPlan.lane && sim.lastPlan.lane.offset_m));
+        if (typeof laneOffset === "number" && Number.isFinite(laneOffset)) {
           body.state = body.state || {};
-          body.state.lateral_offset_m = player.x;
+          body.state.lateral_offset_m = laneOffset;
         }
         if (window.SEMIF_VISION) {
           body.state = body.state || {};

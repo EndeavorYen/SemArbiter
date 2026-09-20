@@ -103,7 +103,9 @@ def test_fsd_overlay_assets_present():
     assert "fillJevAnswers" in js
     assert "answers.motion" in js
     assert "lateral_offset_m" in js
-    assert "player.x" in js
+    assert "lastDecisionState" in js
+    assert "lane.offset_m" in js
+    assert "lateral_offset_m = player.x" not in js
     assert "_steerEma" not in js
 
 

@@ -77,7 +77,12 @@ def compact_jev_state(state: Any) -> Dict[str, Any]:
         else:
             packed[key] = value
     if state.get("lateral_offset_m") is not None:
-        packed["lane_offset"] = format_lane_offset(state.get("lateral_offset_m"))
+        try:
+            lat = float(state.get("lateral_offset_m"))
+        except (TypeError, ValueError):
+            lat = None
+        if lat is not None and abs(lat) <= 8.0:
+            packed["lane_offset"] = format_lane_offset(lat)
     return packed
 
 
