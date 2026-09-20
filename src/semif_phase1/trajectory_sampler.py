@@ -35,6 +35,7 @@ PROMPT_STATE_KEYS = (
     "emergency_vehicle",
     "anomaly",
     "vision",
+    "directive",
 )
 
 

@@ -859,6 +859,13 @@ class DecisionEngine:
                 "probabilities": self._mock_probs(["explain"], "explain"),
             }
 
+        from semif_phase1.directive import fail_safe_choice, plan_directive
+
+        if not isinstance(state, dict):
+            state = {}
+        directive = plan_directive(state.get("vision"), state.get("intersection"))
+        state = {**state, "directive": directive["intent"]}
+
         visual_meta: Dict[str, Any] = {}
         for q_key, q_data in questions.items():
             instructions = q_data.get("instructions", "Choose optimal driving option.")
@@ -956,6 +963,8 @@ class DecisionEngine:
             else:
                 use_prior = self._prior_for(len(options))
                 final_instructions = instructions
+                if q_key == "vector" and directive.get("intent"):
+                    final_instructions = f"{instructions} Intent: {directive['intent']}."
                 ego_x = None
                 try:
                     if state.get("lateral_offset_m") is not None:
@@ -995,6 +1004,15 @@ class DecisionEngine:
 
         self.stats["total_decisions"] += 1
 
+        candidates_now = state.get("candidates") if isinstance(state.get("candidates"), dict) else {}
+        if "vector" in answers and candidates_now:
+            raw_choice = answers["vector"].get("choice")
+            legal = None if raw_mode or mode == "heuristic" else directive
+            safe = fail_safe_choice(candidates_now, raw_choice, legal)
+            if safe and safe != raw_choice:
+                answers["vector"]["choice"] = safe
+                visual_meta["fail_safe"] = True
+
         return {
             "model": self.model_name,
             "answers": answers,
@@ -1019,6 +1037,8 @@ class DecisionEngine:
                 "seed": (state.get("seed") if isinstance(state, dict) else None),
                 "visual_prefix_tokens": visual_meta.get("visual_prefix_tokens", 0),
                 "vision_free_energy": visual_meta.get("vision_free_energy"),
+                "jev1_intent": directive.get("intent"),
+                "fail_safe": bool(visual_meta.get("fail_safe")),
             },
         }
 

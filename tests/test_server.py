@@ -198,6 +198,53 @@ def test_v1_classifier_answers_web_motion_contract(mock_engine):
     assert all(0.0 <= p <= 1.0 for p in vector["probabilities"].values())
 
 
+def test_v1_classifier_fail_safe_and_red_directive(mock_engine):
+    client = TestClient(app)
+    req = {
+        "mode": "flat",
+        "state": {
+            "speed_mps": 12.0,
+            "intersection": {"control": "signal", "signal": "red", "distance_to_line_m": 12},
+            "vision": {"signal": "red", "event": "RED signal ahead, mandatory stop"},
+            "candidates": {
+                "v0": [12.0, 0.0, 0.1, 0.0, False, False],
+                "v1": [0.0, 0.0, 0.0, 0.0, False, True],
+            },
+        },
+        "questions": {
+            "vector": {
+                "type": "choice",
+                "instructions": "Choose a safe driving path.",
+                "criteria": {"v0": None, "v1": None},
+            }
+        },
+    }
+    data = client.post("/v1/classifier", json=req).json()
+    assert data["meta"]["jev1_intent"] == "RED_LIGHT_STOP"
+    assert data["answers"]["vector"]["choice"] == "v1"
+
+    crash = {
+        "mode": "flat",
+        "state": {
+            "vision": {"event": "road clear ahead, maintain lane"},
+            "candidates": {
+                "v0": [16.0, 0.0, 0.0, 0.0, True, False],
+                "v1": [0.0, 0.0, 0.0, 0.0, False, True],
+            },
+        },
+        "questions": {
+            "vector": {
+                "type": "choice",
+                "instructions": "Choose a safe driving path.",
+                "criteria": {"v0": None, "v1": None},
+            }
+        },
+    }
+    hit = client.post("/v1/classifier", json=crash).json()
+    assert hit["meta"]["jev1_intent"] == "CRUISE"
+    assert hit["answers"]["vector"]["choice"] == "v1"
+
+
 def test_v1_classifier_red_light_compliance(mock_engine):
     """Verify JevPilot 2.0 Tier 1 Strategic Maneuver correctly halts before red light."""
     client = TestClient(app)
