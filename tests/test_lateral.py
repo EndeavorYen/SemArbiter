@@ -7,6 +7,7 @@ from semif_phase1.lateral import (
     LATERAL_PD_LIMIT,
     LOOKAHEAD_MAX_M,
     LOOKAHEAD_MIN_M,
+    LOOKAHEAD_S,
     STEER_SLEW,
     YAW_KD,
     dampen_stanley_steer,
@@ -52,7 +53,9 @@ def test_lane_keep_maneuver_converts_steer_only_to_centerline():
     m = lane_keep_maneuver(None, 16.0)
     assert m["lane_offset_m"] == 0.0
     assert LOOKAHEAD_MIN_M <= m["lookahead_m"] <= LOOKAHEAD_MAX_M
-    assert m["lookahead_m"] >= 12.0
+    assert m["lookahead_m"] == max(
+        LOOKAHEAD_MIN_M, min(LOOKAHEAD_MAX_M, LOOKAHEAD_S * 16.0)
+    )
     held = lane_keep_maneuver(1.35, 12.0)
     assert held["lane_offset_m"] == 0.0
     pull = lane_keep_maneuver(2.0, 12.0)
@@ -152,9 +155,17 @@ def test_overlay_applies_pd_not_steer_ema():
     assert "lookahead_m" in js
     assert "src.lane_offset_m = 0" in js
     assert "SEMIF_APPLY_STEER" in js
+    steer_fn = js.split("window.SEMIF_APPLY_STEER")[1].split("function laneOffsetM")[0]
+    assert "lateralPd(" in steer_fn
+    assert "dampenStanleySteer(" in steer_fn
+    apply_fn = js.split("function applyLateralPd")[1].split("function applyRawMode")[0]
+    assert "lateralPd(" not in apply_fn
     assert "YAW_KD" in js
     assert "STEER_SLEW" in js
     assert "dampenStanleySteer" in js
+    assert "LOOKAHEAD_MIN_M" in js
+    assert str(LOOKAHEAD_MIN_M) in js
+    assert str(LOOKAHEAD_MAX_M) in js
     assert "LATERAL_KP" in js
     assert str(LATERAL_KP) in js
     assert str(LATERAL_KD) in js

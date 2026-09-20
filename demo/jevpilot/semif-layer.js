@@ -92,9 +92,9 @@
   const LATERAL_PD_LIMIT = 0.12;
   const DETOUR_STEER = 0.28;
   const LANE_KEEP_OFFSET_M = 1.4;
-  const LOOKAHEAD_MIN_M = 10;
-  const LOOKAHEAD_MAX_M = 16;
-  const LOOKAHEAD_S = 0.9;
+  const LOOKAHEAD_MIN_M = 4.0;
+  const LOOKAHEAD_MAX_M = 8.0;
+  const LOOKAHEAD_S = 0.45;
   const YAW_KD = 0.25;
   const STEER_SLEW = 0.9;
 
@@ -144,6 +144,9 @@
     const sim = window.SEMIF_SIM;
     if (!sim || !sim.autopilot || sim.paused || sim.crash || !player) return u;
     const dt = Math.min(Math.max(Number(sim._pdDt) || 0.016, 0.008), 0.05);
+    const offset = laneOffsetM(sim) || 0;
+    const offsetDot = (offset - (sim._lastOffset == null ? offset : sim._lastOffset)) / dt;
+    sim._lastOffset = offset;
     const heading = Number(player.heading) || 0;
     let yaw = 0;
     if (sim._pdHeading != null && Number.isFinite(sim._pdHeading)) {
@@ -153,7 +156,8 @@
       yaw = d / dt;
     }
     sim._pdHeading = heading;
-    const out = dampenStanleySteer(u, yaw, sim._pdU, dt);
+    const pdU = lateralPd(u, offset, offsetDot);
+    const out = dampenStanleySteer(pdU, yaw, sim._pdU, dt);
     sim._pdU = out;
     return out;
   };
@@ -190,25 +194,7 @@
         return;
       }
       src.lane_offset_m = keep.lane_offset_m;
-      return;
     }
-    const measured = laneOffsetM(sim);
-    if (measured == null) return;
-    const step = Math.min(Math.max(Number(dt) || 0.016, 0), 0.05);
-    if (sim._pdPrevE == null) {
-      sim._pdPrevE = measured;
-      sim._pdDot = 0;
-    } else if (measured !== sim._pdPrevE) {
-      sim._pdDot = (measured - sim._pdPrevE) / Math.max(step, 0.05);
-      sim._pdPrevE = measured;
-    } else {
-      sim._pdDot *= 0.85;
-    }
-    const uSel =
-      src && src._pdCaptured ? src._pdSelSteer : Number(p.steering) || 0;
-    const u = lateralPd(uSel, measured, sim._pdDot);
-    p.steering = u;
-    if (src) src.steering = u;
   }
 
   function applyRawMode(on) {
