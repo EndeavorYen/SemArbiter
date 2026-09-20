@@ -46,7 +46,9 @@ flowchart LR
 
 像素不進 letter-slot prompt。`compact_jev_state` 只留 `vision.signal / red / pedestrian / …`。
 
-閉環沒有真實相機：`vision_mode=synthetic` 依場景名填合成證據（紅燈→red 高）。這是夾具，**不是** CLIP 成績。CUDA 報告若 `backend=synthetic` 不得寫成「視覺編碼器準確率」。
+閉環沒有 3D 相機。官方 CUDA 成績用 **CLIP 看 PIL 畫的前方示意幀**（紅燈畫紅圓、行人畫人影），`vision_mode=clip`。若 CLIP 載入失敗直接中止，不准退回合成標籤。
+
+`vision_mode=synthetic` 只給 pytest／`--mock`，不得當 CLIP 準確率。
 
 ---
 

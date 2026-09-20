@@ -440,6 +440,14 @@ def run_jevpilot2_episode(
 
                 obs = dict(obs)
                 obs["vision"] = vision_from_scenario(scenario)
+            elif vision_mode == "clip":
+                from semif_phase1.vision import get_vision_encoder, render_scenario_frame
+
+                encoder = get_vision_encoder()
+                if encoder.backend == "stub":
+                    raise RuntimeError("CLIP did not load; refuse synthetic scores for clip mode")
+                obs = dict(obs)
+                obs["vision"] = encoder.infer_pil(render_scenario_frame(scenario, env))
             req = {
                 "model": engine.model_name,
                 "mode": mode,

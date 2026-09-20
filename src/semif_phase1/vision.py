@@ -54,6 +54,37 @@ def synthetic_vision(**labels: Any) -> Dict[str, Any]:
     }
 
 
+def render_scenario_frame(scenario: str, env: Any = None) -> Any:
+    """Draw a crude forward view so CLIP has pixels. Not a camera from 3D."""
+    from PIL import Image, ImageDraw
+
+    img = Image.new("RGB", (224, 224), (120, 170, 220))
+    draw = ImageDraw.Draw(img)
+    draw.rectangle((0, 120, 224, 224), fill=(70, 75, 78))
+    draw.polygon([(112, 120), (40, 224), (184, 224)], fill=(50, 52, 54))
+    dist = 30.0
+    if env is not None:
+        dist = max(4.0, 55.0 - float(getattr(env, "z", 0.0)))
+    scale = max(8, int(80 * (20.0 / dist)))
+    cx = 112
+    if scenario == "traffic_light_red":
+        draw.rectangle((cx - 10, 20, cx + 10, 90), fill=(30, 30, 30))
+        draw.ellipse((cx - 14, 24, cx + 14, 52), fill=(220, 30, 30))
+    elif scenario == "speed_zone_city":
+        draw.rectangle((cx - 10, 20, cx + 10, 90), fill=(30, 30, 30))
+        draw.ellipse((cx - 14, 54, cx + 14, 82), fill=(30, 180, 50))
+    elif scenario == "pedestrian_jaywalking":
+        draw.rectangle((cx - 8, 130, cx + 8, 130 + scale), fill=(20, 20, 20))
+        draw.ellipse((cx - 10, 118, cx + 10, 138), fill=(40, 30, 25))
+    elif scenario in ("cut_in_vehicle", "roadside_parked_hazard", "emergency_vehicle", "ambiguous_priority"):
+        w = scale
+        draw.rectangle((cx - w, 150, cx + w, 150 + int(scale * 0.8)), fill=(180, 40, 40) if scenario == "emergency_vehicle" else (90, 90, 95))
+    elif scenario == "construction_detour":
+        for x in (70, 100, 130):
+            draw.polygon([(x, 200), (x + 16, 140), (x + 32, 200)], fill=(230, 120, 20))
+    return img
+
+
 def vision_from_scenario(scenario: str) -> Dict[str, Any]:
     """Map a closed-loop scenario name to synthetic visual evidence."""
     table: Dict[str, Dict[str, float]] = {
@@ -91,9 +122,24 @@ class VisionEncoder:
     def _load(self) -> None:
         try:
             import torch
-            from transformers import CLIPModel, CLIPProcessor
+            from tokenizers import processors as tok_processors
+            from transformers.models.clip import tokenization_clip as clip_tok
 
-            self._processor = CLIPProcessor.from_pretrained(self.model_id)
+            orig = tok_processors.RobertaProcessing
+
+            def _roberta(sep, cls=None, cls_token=None, trim_offsets=True, add_prefix_space=True, **_kw):
+                token = cls_token if cls_token is not None else cls
+                return orig(sep, token, trim_offsets=trim_offsets, add_prefix_space=add_prefix_space)
+
+            tok_processors.RobertaProcessing = _roberta
+            clip_tok.processors.RobertaProcessing = _roberta
+
+            from transformers import CLIPImageProcessor, CLIPModel, CLIPTokenizer
+
+            tokenizer = CLIPTokenizer.from_pretrained(self.model_id)
+            image_proc = CLIPImageProcessor.from_pretrained(self.model_id)
+            self._tokenizer = tokenizer
+            self._image_proc = image_proc
             self._model = CLIPModel.from_pretrained(self.model_id)
             self._model.to(self.device)
             self._model.eval()
@@ -102,13 +148,17 @@ class VisionEncoder:
         except Exception:
             self.backend = "stub"
             self._model = None
+            self._tokenizer = None
+            self._image_proc = None
 
     def infer_pil(self, image: Any) -> Dict[str, Any]:
-        if self._model is None or self._processor is None:
+        if self._model is None or self._tokenizer is None or self._image_proc is None:
             return synthetic_vision()
         torch = self._torch
         texts = [text for _key, text in _PROMPTS]
-        inputs = self._processor(text=texts, images=image, return_tensors="pt", padding=True)
+        text_inputs = self._tokenizer(texts, padding=True, return_tensors="pt")
+        image_inputs = self._image_proc(images=image, return_tensors="pt")
+        inputs = {**text_inputs, **image_inputs}
         inputs = {key: value.to(self.device) for key, value in inputs.items()}
         with torch.no_grad():
             out = self._model(**inputs)

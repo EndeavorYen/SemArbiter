@@ -26,8 +26,15 @@ def main() -> None:
     args = parser.parse_args()
 
     engine = DecisionEngine(use_mock=args.mock, device=None if args.mock else "cuda")
+    if not args.mock:
+        from semif_phase1.vision import get_vision_encoder
+
+        enc = get_vision_encoder()
+        if enc.backend == "stub":
+            raise SystemExit("CLIP required for official vision scores (got stub)")
     arms = {}
-    for vision_mode in ("off", "synthetic"):
+    vision_arm = "synthetic" if args.mock else "clip"
+    for vision_mode in ("off", vision_arm):
         eps = {}
         compact = {}
         for mode in ("heuristic", "flat"):
