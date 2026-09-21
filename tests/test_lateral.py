@@ -155,6 +155,12 @@ def test_web_offset_pursuit_200m_stays_within_15cm():
         assert peak <= 0.15, f"seed {seed} peak {peak:.3f} m"
 
 
+def test_web_stanley_curve_stays_within_15cm():
+    """Interstate seed 42: A() at 10 m/s with look 4.5 m peaked 0.17 m; 4.0 m held 0.13 m."""
+    m = lane_keep_maneuver(0.0, 10.0)
+    assert m["lookahead_m"] <= 4.0, f"10 m/s lookahead {m['lookahead_m']} m"
+
+
 def _straight_peak(*, use_pd: bool, seed: int) -> float:
     """10 Hz discrete micro-steer, 60 Hz bicycle matching JevPilot2Simulator."""
     rng = __import__("random").Random(seed)
@@ -203,6 +209,7 @@ def _web_pursuit_peak(*, use_center_ref: bool, seed: int) -> float:
         t += dt
         peak = max(peak, abs(e))
     return peak
+
 
 
 def test_apply_steer_command_uses_offset():

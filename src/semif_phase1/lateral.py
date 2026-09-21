@@ -14,7 +14,7 @@ DETOUR_STEER = 0.28  # skip PD when the selected steer is already a lane change
 LANE_KEEP_OFFSET_M = 1.4
 LOOKAHEAD_MIN_M = 4.0
 LOOKAHEAD_MAX_M = 8.0
-LOOKAHEAD_S = 0.45  # seconds of path A() should look ahead (city scale)
+LOOKAHEAD_S = 0.40  # 10 m/s → 4 m; 4.5 m cut the Interstate bend at 0.17 m
 YAW_KD = 0.08  # light yaw damp; 0.25 fought the centering turn
 STEER_SLEW = 0.9  # rad/s cap on the command into w()
 
@@ -58,7 +58,7 @@ def lane_keep_pursuit_offset(selected_offset_m):
 def lane_keep_maneuver(selected_offset_m, speed_mps: float) -> dict:
     """Centerline pursuit for lane-keep, including Web steer-only (null offset) leaves.
 
-    Lookahead is 4–8 m so Stanley regain is stiff enough in town.
+    Lookahead is 4–8 m. 10 m/s stays at 4 m so Interstate bends stay inside 0.15 m.
     """
     keep = selected_offset_m is None or abs(float(selected_offset_m)) <= LANE_KEEP_OFFSET_M
     if not keep:

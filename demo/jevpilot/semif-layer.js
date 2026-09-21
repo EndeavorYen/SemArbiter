@@ -95,7 +95,7 @@
   const LANE_KEEP_OFFSET_M = 1.4;
   const LOOKAHEAD_MIN_M = 4.0;
   const LOOKAHEAD_MAX_M = 8.0;
-  const LOOKAHEAD_S = 0.45;
+  const LOOKAHEAD_S = 0.40;
   const YAW_KD = 0.08;
   const STEER_SLEW = 0.9;
 
