@@ -360,13 +360,20 @@ if (spec.cmd === "dom") {
   world.mode = "chase";
   window.SEMIF_GRAB_FRAME();
   const second = shots.filter((s) => s.op === "render").pop();
+  const beforeView = shots.filter((s) => s.op === "render").length;
+  nowMs = 0;
+  window.__raf();
+  nowMs = 500;
+  window.__raf();
   nowMs = 1000;
-  window.SEMIF_GRAB_FRAME();
+  window.__raf();
+  const viewShots = shots.filter((s) => s.op === "render").length - beforeView;
   process.stdout.write(JSON.stringify({
     url,
     mode: world.mode,
     first,
     second,
+    viewShots,
     ops: plainOps(canvas.__ctx.ops),
     fps: fps.textContent,
   }));
@@ -444,13 +451,15 @@ def test_pip_shows_the_fixed_onboard_camera_not_the_player_view():
     shot = grabbed["first"]
     assert shot["fov"] == 60
     assert shot["x"] == pytest.approx(10.15)
-    assert shot["y"] == pytest.approx(1.27)
-    assert shot["z"] == pytest.approx(-4.3)
+    assert shot["y"] == pytest.approx(1.45)
+    assert shot["z"] == pytest.approx(-4)
     assert shot["look"]["x"] == pytest.approx(10.15 + 25)
-    assert shot["look"]["z"] == pytest.approx(-4.3)
+    assert shot["look"]["z"] == pytest.approx(-4)
     again = grabbed["second"]
     assert again["x"] == pytest.approx(shot["x"])
     assert again["z"] == pytest.approx(shot["z"])
+    assert grabbed["viewShots"] == 3
+    assert grabbed["fps"] == "2 FPS"
     assert any(op["op"] == "putImageData" for op in grabbed["ops"])
     assert not any(op["op"] == "drawImage" for op in grabbed["ops"])
     js = OVERLAY_JS.read_text(encoding="utf-8")

@@ -476,13 +476,12 @@
     return Math.round(((pipFrameMs.length - 1) * 1000) / span) + " FPS";
   }
 
-  function onboardMount(player, rig) {
-    const eye = (rig && rig.userData) || {};
-    const ahead = eye.eyeForward == null ? 0.15 : Number(eye.eyeForward);
-    const height = eye.eyeHeight || 1.27;
+  function onboardMount(player) {
+    const ahead = 0.15;
+    const height = 1.45;
     const h = Number(player.heading) || 0;
-    const x = player.x + Math.sin(h) * ahead - Math.cos(h) * 0.3;
-    const z = player.z - Math.cos(h) * ahead - Math.sin(h) * 0.3;
+    const x = player.x + Math.sin(h) * ahead;
+    const z = player.z - Math.cos(h) * ahead;
     return {
       x: x,
       y: height,
@@ -511,7 +510,7 @@
     const scene = world && world.scene;
     const sample = world && world.sun && world.sun.shadow && world.sun.shadow.map;
     if (!player || !renderer || !scene || !sample || !world.camera || !pipCanvas) return false;
-    const mount = onboardMount(player, world.player);
+    const mount = onboardMount(player);
     if (!world._onboardCam) world._onboardCam = world.camera.clone();
     const cam = world._onboardCam;
     cam.fov = 60;
@@ -589,6 +588,11 @@
       if (seed != null && document.activeElement !== seedInput) seedInput.value = String(seed);
       drawBoxes(sim, world);
     }
+    try {
+      if (renderOnboard(world) && pipFps) pipFps.textContent = pipFpsText(performance.now());
+    } catch (_err) {
+      /* The onboard view must not kill the drive loop */
+    }
     requestAnimationFrame(tick);
   }
 
@@ -597,7 +601,6 @@
   function grabFrame() {
     const world = window.SEMIF_WORLD;
     if (!renderOnboard(world) || !pipCanvas) return null;
-    if (pipFps) pipFps.textContent = pipFpsText(performance.now());
     return pipCanvas.toDataURL("image/jpeg", 0.55);
   }
 
