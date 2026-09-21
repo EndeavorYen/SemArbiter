@@ -42,6 +42,7 @@ def main() -> None:
             raise SystemExit("vision encoder required for official scores (got stub)")
         vision_backend = enc.backend
     arms = {}
+    loop_latencies = []
     vision_arm = "synthetic" if args.mock else "clip"
     for vision_mode in ("off", vision_arm):
         eps = {}
@@ -57,6 +58,8 @@ def main() -> None:
             )
             eps[mode] = summary["episodes"]
             compact[mode] = {k: v for k, v in summary.items() if k != "episodes"}
+            for ep in summary["episodes"]:
+                loop_latencies.extend(ep["latencies"])
         arms[vision_mode] = {
             "modes": compact,
             "driving_quality": compare_driving(eps),
@@ -75,25 +78,9 @@ def main() -> None:
     }
     if args.web_telemetry:
         web = json.loads(Path(args.web_telemetry).read_text(encoding="utf-8"))
-        local_samples = []
-        payload = {
-            "mode": "flat",
-            "state": {
-                "speed_mps": 12.0,
-                "candidates": {
-                    "t00": [12.0, 0.0, 0.0, 0.0, False, False],
-                    "t01": [0.0, 0.0, 0.0, 0.0, False, True],
-                },
-            },
-            "questions": {
-                "vector": {"type": "choice", "criteria": {"t00": None, "t01": None}},
-            },
-        }
-        for _ in range(8):
-            local_samples.append(float(engine.classify_jev(payload)["classifier_ms"]))
         report["web_alignment"] = align_web_export(
             web,
-            {"classifier_ms": summarize_latency(local_samples)},
+            {"classifier_ms": summarize_latency(loop_latencies)},
         )
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
     Path(args.output).write_text(json.dumps(report, indent=2), encoding="utf-8")

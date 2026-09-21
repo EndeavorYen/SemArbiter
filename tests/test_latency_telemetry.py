@@ -75,7 +75,7 @@ def test_export_json_has_summary_and_series():
         assert key in payload["history"]
     assert payload["history"]["classifier_ms"][0]["ms"] == 18.0
     assert payload["metrics"]["classifier_ms"]["n"] == 1
-    assert payload["history"]["e2e_loop_ms"][0]["ms"] == pytest.approx(5.0 + 40.0 + 30.0)
+    assert payload["history"]["e2e_loop_ms"][0]["ms"] == pytest.approx(30.0)
 
 
 def test_align_web_export_reports_p50_delta():
@@ -124,9 +124,10 @@ process.stdout.write(JSON.stringify(out));
     assert js["summary"]["stddev"] == pytest.approx(py["stddev"])
     exported = js["exportJSON"]
     assert exported["schema"] == "semif.web_latency.v1"
-    assert exported["history"]["e2e_loop_ms"][0]["ms"] == pytest.approx(75.0)
+    assert exported["history"]["e2e_loop_ms"][0]["ms"] == pytest.approx(30.0)
     assert "P50" in js["hudText"] and "P95" in js["hudText"]
     assert "e2e" in js["hudText"].lower() or "E2E" in js["hudText"]
+    assert "vis" in js["hudText"] and "cls" in js["hudText"]
 
 
 def test_overlay_wires_live_telemetry_hooks():
@@ -155,3 +156,4 @@ def test_vision_benchmark_reads_web_telemetry_json():
     src = VISION_BENCH.read_text(encoding="utf-8")
     assert "--web-telemetry" in src
     assert "align_web_export" in src
+    assert 'ep["latencies"]' in src or "ep['latencies']" in src

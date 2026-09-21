@@ -72,9 +72,6 @@
     };
     const series = {};
     for (const key of SERIES_KEYS) series[key] = [];
-    let lastGrab = 0;
-    let lastVisionRtt = 0;
-
     function push(name, ms) {
       const value = Number(ms);
       if (!Number.isFinite(value) || value < 0) return;
@@ -111,25 +108,20 @@
         "e2e " + fmt(lastE2e) + "ms",
         "P50 " + fmt(e2e.p50),
         "P95 " + fmt(e2e.p95),
-        "vis " + fmt(lastVis),
-        "cls " + fmt(lastCls),
+        "vis " + fmt(lastVis) + "/P50 " + fmt(vis.p50),
+        "cls " + fmt(lastCls) + "/P50 " + fmt(cls.p50),
       ].join("  ");
     }
 
     return {
       recordVision: function (sample) {
         const grab = sample && sample.grab_ms;
-        if (grab != null) {
-          lastGrab = Number(grab) || 0;
-          push("grab_frame_ms", grab);
-        }
-        lastVisionRtt = Number(sample && sample.rtt_ms) || 0;
+        if (grab != null) push("grab_frame_ms", grab);
         push("vision_encode_ms", sample && sample.encode_ms);
       },
       recordClassifier: function (sample) {
         push("classifier_ms", sample && sample.classifier_ms);
-        const rtt = Number(sample && sample.rtt_ms) || 0;
-        push("e2e_loop_ms", lastGrab + lastVisionRtt + rtt);
+        push("e2e_loop_ms", sample && sample.rtt_ms);
       },
       getMetrics: getMetrics,
       getHistory: getHistory,

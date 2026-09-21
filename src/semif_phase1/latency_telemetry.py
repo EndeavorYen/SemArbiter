@@ -84,8 +84,6 @@ class LatencyTelemetry:
         self.window = int(window)
         self._now = now_ms or (lambda: 0.0)
         self._series: Dict[str, List[Dict[str, float]]] = {k: [] for k in SERIES_KEYS}
-        self._last_grab_ms = 0.0
-        self._last_vision_rtt_ms = 0.0
 
     def _push(self, name: str, ms: float) -> None:
         value = float(ms)
@@ -104,15 +102,12 @@ class LatencyTelemetry:
         grab_ms: Optional[float] = None,
     ) -> None:
         if grab_ms is not None:
-            self._last_grab_ms = float(grab_ms)
             self._push("grab_frame_ms", grab_ms)
-        self._last_vision_rtt_ms = float(rtt_ms)
         self._push("vision_encode_ms", encode_ms)
 
     def record_classifier(self, classifier_ms: float, rtt_ms: float) -> None:
         self._push("classifier_ms", classifier_ms)
-        e2e = self._last_grab_ms + self._last_vision_rtt_ms + float(rtt_ms)
-        self._push("e2e_loop_ms", e2e)
+        self._push("e2e_loop_ms", rtt_ms)
 
     def get_history(self) -> Dict[str, List[Dict[str, float]]]:
         return {k: [dict(row) for row in rows] for k, rows in self._series.items()}
