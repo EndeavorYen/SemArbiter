@@ -1,4 +1,7 @@
-"""Fast-loop lateral PD on top of a selected steer. Does not pick a trajectory."""
+"""Lane-keep reference and the one-dimensional plant's lateral PD.
+
+The web bicycle does not use this PD. Its steer is pure pursuit from A().
+"""
 
 from __future__ import annotations
 
@@ -15,8 +18,6 @@ LANE_KEEP_OFFSET_M = 1.4
 LOOKAHEAD_MIN_M = 4.0
 LOOKAHEAD_MAX_M = 8.0
 LOOKAHEAD_S = 0.40  # 10 m/s → 4 m; 4.5 m cut the Interstate bend at 0.17 m
-YAW_KD = 0.08  # light yaw damp; 0.25 fought the centering turn
-STEER_SLEW = 0.9  # rad/s cap on the command into w()
 
 
 def signed_lane_offset(px: float, pz: float, qx: float, qz: float, heading: float) -> float:
@@ -65,42 +66,6 @@ def lane_keep_maneuver(selected_offset_m, speed_mps: float) -> dict:
         return {"lane_offset_m": float(selected_offset_m), "lookahead_m": None}
     look = max(LOOKAHEAD_MIN_M, min(LOOKAHEAD_MAX_M, LOOKAHEAD_S * abs(float(speed_mps))))
     return {"lane_offset_m": 0.0, "lookahead_m": look}
-
-
-def apply_steer_command(
-    u_a: float,
-    offset_m: float,
-    offset_dot: float,
-    yaw_rate: float,
-    prev_u: float | None,
-    dt: float,
-) -> float:
-    """Live Web path: A() output, then lateral PD, then yaw slew. One function."""
-    return dampen_stanley_steer(
-        lateral_pd(u_a, offset_m, offset_dot),
-        yaw_rate,
-        prev_u,
-        dt,
-    )
-
-
-def dampen_stanley_steer(
-    u_selected: float,
-    yaw_rate: float,
-    prev_u: float | None,
-    dt: float,
-) -> float:
-    """Oppose yaw and slew-limit A() output. Not an EMA on player.steer."""
-    u = float(u_selected) - YAW_KD * float(yaw_rate)
-    step = max(1e-3, float(dt))
-    if prev_u is not None:
-        max_du = STEER_SLEW * step
-        du = u - float(prev_u)
-        if du > max_du:
-            u = float(prev_u) + max_du
-        elif du < -max_du:
-            u = float(prev_u) - max_du
-    return max(-STEER_LIMIT, min(STEER_LIMIT, u))
 
 
 def lateral_pd(

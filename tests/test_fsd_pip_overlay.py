@@ -19,11 +19,7 @@ OVERLAY_CSS = REPO / "demo" / "jevpilot" / "semif-layer.css"
 
 PIP_W = 320
 PIP_H = 180
-TITLE = "CAMERA: Front Main (60° FOV)"
-RIBBON = "rgba(34, 211, 238, 0.45)"
-PED_STROKE = "#22c55e"
-CUT_STROKE = "#f5c518"
-LIGHT_RED = "#ef4444"
+TITLE = "CAMERA: vision frame"
 
 
 def _perspective(fov_deg: float, aspect: float, near: float, far: float) -> list[float]:
@@ -72,7 +68,7 @@ function makeCtx(canvas) {
     strokeRect(x, y, w, h) { ops.push({ op: "strokeRect", x, y, w, h, strokeStyle }); },
     fillRect(x, y, w, h) { ops.push({ op: "fillRect", x, y, w, h, fillStyle }); },
     fillText(text, x, y) { ops.push({ op: "fillText", text: String(text), x, y, fillStyle }); },
-    drawImage(src, dx, dy, dw, dh) { ops.push({ op: "drawImage", src, dx, dy, dw, dh }); },
+    drawImage(src, dx, dy, dw, dh) { ops.push({ op: "drawImage", dx, dy, dw, dh }); },
     setLineWidth() {},
     measureText(text) { return { width: String(text).length * 6 }; },
   };
@@ -315,12 +311,23 @@ if (spec.cmd === "dom") {
   process.stdout.write(JSON.stringify({
     first, second,
     fps: fps.textContent,
-    fit: api.fitContain(srcW, srcH, canvas.width, canvas.height),
-    sameRaf: window.__raf.length >= 0,
   }));
 } else if (spec.cmd === "ribbon") {
   const pts = api.ribbonPoints(spec.player, spec.maneuver);
   process.stdout.write(JSON.stringify(pts));
+} else if (spec.cmd === "grab") {
+  const worldCanvas = el("canvas");
+  worldCanvas.width = spec.srcW;
+  worldCanvas.height = spec.srcH;
+  window.SEMIF_WORLD = { canvas: worldCanvas };
+  canvas.__ctx.ops.length = 0;
+  nowMs = 0;
+  const url = window.SEMIF_GRAB_FRAME();
+  nowMs = 500;
+  window.SEMIF_GRAB_FRAME();
+  nowMs = 1000;
+  window.SEMIF_GRAB_FRAME();
+  process.stdout.write(JSON.stringify({ ops: plainOps(canvas.__ctx.ops), url, fps: fps.textContent }));
 } else if (spec.cmd === "keys") {
   const beforeHidden = pip.classList.contains("fsd-pip-hidden");
   const beforeFold = pip.classList.contains("fsd-pip-collapsed");
@@ -379,127 +386,30 @@ def test_pip_shell_is_in_the_loaded_overlay():
     assert dom["canvas"] == {"w": PIP_W, "h": PIP_H}
     assert dom["fps0"] == "-- FPS"
     css = OVERLAY_CSS.read_text(encoding="utf-8")
+    html = (REPO / "demo" / "jevpilot" / "index.html").read_text(encoding="utf-8")
+    assert "preserveDrawingBuffer" in html.split('type="module"')[0]
     assert "#fsd-pip" in css
     assert "pointer-events: auto" in css
     assert "fsd-pip-collapsed" in css
     assert "fsd-pip-hidden" in css
 
 
-def test_ground_contact_unprojects_through_the_same_camera():
-    back = _run({"cmd": "project", "w": PIP_W, "h": PIP_H, "x": 1.5, "y": 0.05, "z": -12.0})
-    assert back["pt"]["x"] > PIP_W / 2
-    assert abs(back["back"]["x"] - 1.5) < 0.05
-    assert abs(back["back"]["z"] + 12.0) < 0.05
-
-
-def test_frame_paints_the_grab_canvas_and_ped_label():
-    ped = {"type": "pedestrian", "x": 0.0, "z": -12.0, "height": 1.7}
-    painted = _run({
-        "cmd": "paint",
-        "srcW": PIP_W,
-        "srcH": PIP_H,
-        "speed": 10,
-        "ped": ped,
-        "maneuver": {"lane_offset_m": 0.0, "velocity_mps": 10.0, "lookahead_m": 8.0},
-        "agents": [],
-        "decision": {},
-    })
-    ops = painted["first"]
+def test_pip_shows_the_frame_grab_posts_to_vision():
+    """The window is the bitmap grabFrame encodes, not simulator coordinates."""
+    grabbed = _run({"cmd": "grab", "srcW": 640, "srcH": 480})
+    ops = grabbed["ops"]
     images = [op for op in ops if op["op"] == "drawImage"]
-    assert images and images[0]["dw"] == PIP_W and images[0]["dh"] == PIP_H
-    texts = [op["text"] for op in ops if op["op"] == "fillText"]
-    assert any(t.startswith("PED 12.0m") for t in texts)
-    assert any("(0.0, 12.0)" in t for t in texts)
-    boxes = [op for op in ops if op["op"] == "strokeRect"]
-    assert any(op["strokeStyle"] == PED_STROKE for op in boxes)
-    assert any(op["op"] == "stroke" and op["strokeStyle"] == PED_STROKE for op in ops)
-    assert painted["fps"] == "2 FPS"
-
-
-def test_cut_in_and_signal_use_distinct_marks():
-    painted = _run({
-        "cmd": "paint",
-        "srcW": PIP_W,
-        "srcH": PIP_H,
-        "speed": 8,
-        "ped": None,
-        "maneuver": {"lane_offset_m": 0.0, "velocity_mps": 8.0, "lookahead_m": 6.0},
-        "agents": [{
-            "type": "car",
-            "_fsd": "cutin",
-            "x": 2.0,
-            "z": -16.0,
-            "height": 1.5,
-            "_cut": 1.8,
-        }],
-        "decision": {
-            "scene": {
-                "intersection": {
-                    "signal": "red",
-                    "visible": True,
-                    "stop_line_position": {"x": 0.0, "z": -20.0},
-                }
-            }
-        },
-    })
-    ops = painted["first"]
-    texts = [op["text"] for op in ops if op["op"] == "fillText"]
-    assert any("CUT-IN" in t and "tau 1.8s" in t for t in texts)
-    assert any(op["op"] == "strokeRect" and op["strokeStyle"] == CUT_STROKE for op in ops)
-    assert any(op["op"] == "arc" and LIGHT_RED in op["strokeStyle"] for op in ops)
-
-
-def test_ribbon_tracks_the_selected_maneuver_on_the_next_frame():
-    painted = _run({
-        "cmd": "paint",
-        "srcW": 640,
-        "srcH": 480,
-        "speed": 10,
-        "ped": None,
-        "maneuver": {"lane_offset_m": 0.0, "velocity_mps": 10.0, "lookahead_m": 8.0},
-        "maneuver2": {"lane_offset_m": 4.0, "velocity_mps": 10.0, "lookahead_m": 8.0},
-        "agents": [],
-        "decision": {},
-    })
-    fit = painted["fit"]
-    assert fit["w"] < PIP_W or fit["h"] == PIP_H
-    assert fit["x"] > 0
-
-    def far_x(ops):
-        fills = [i for i, op in enumerate(ops) if op["op"] == "fill" and op["fillStyle"] == RIBBON]
-        assert fills, ops
-        pts = [op for op in ops[: fills[0]] if op["op"] == "lineTo"]
-        assert len(pts) >= 4
-        return min(pts, key=lambda op: op["y"])["x"]
-
-    assert abs(far_x(painted["second"]) - far_x(painted["first"])) > 5
-
-
-def test_ribbon_follows_the_route_instead_of_a_straight_heading():
-    """A 90 degree route must not keep the 3s ribbon on the initial heading."""
-    route = []
-    for i in range(11):
-        s = i * 2.0
-        if s <= 10:
-            route.append({"x": 0.0, "z": -s, "s": s})
-        else:
-            route.append({"x": s - 10.0, "z": -10.0, "s": s})
-    pts = _run({
-        "cmd": "ribbon",
-        "player": {
-            "x": 0.0,
-            "z": 0.0,
-            "s": 0.0,
-            "heading": 0.0,
-            "speed": 10,
-            "route": {"points": route},
-        },
-        "maneuver": {"lane_offset_m": 0.0, "velocity_mps": 10.0, "lookahead_m": 8.0},
-    })
-    far = pts[-1]
-    assert far["x"] > 8
-    assert abs(far["z"] + 10) < 1.5
-    assert abs(far["heading"] - (math.pi / 2)) < 0.2
+    assert images
+    assert images[-1]["dx"] == pytest.approx(40)
+    assert images[-1]["dw"] == pytest.approx(240)
+    assert images[-1]["dh"] == pytest.approx(PIP_H)
+    assert grabbed["url"].startswith("data:image/jpeg")
+    assert not any(op["op"] in {"fillText", "strokeRect", "arc"} for op in ops)
+    assert grabbed["fps"] == "2 FPS"
+    js = OVERLAY_JS.read_text(encoding="utf-8")
+    vision = js.split("async function visionTick")[1].split("if (visionOn)")[0]
+    assert "grabFrame()" in vision
+    assert "showSentFrame" not in vision
 
 
 def test_v_and_header_toggle_without_stealing_seed_input():

@@ -17,7 +17,7 @@
     <div id="fsd-boxes"></div>
     <div id="fsd-pip">
       <div class="fsd-pip-header">
-        <span class="fsd-pip-title">CAMERA: Front Main (60° FOV)</span>
+        <span class="fsd-pip-title">CAMERA: vision frame</span>
         <span id="fsd-pip-fps" class="fsd-pip-fps">-- FPS</span>
       </div>
       <div class="fsd-pip-body">
@@ -30,7 +30,7 @@
       </label>
       <button type="button" id="fsd-seed-apply">Apply</button>
       <button type="button" id="fsd-seed-rand">Random</button>
-      <span id="fsd-intent">SemIf</span>
+      <span id="fsd-intent">SemArbiter</span>
       <span id="fsd-vision">VISION off</span>
       <span id="fsd-latency">e2e —  P50 —  P95 —</span>
       <button type="button" id="fsd-latency-export">Export latency</button>
@@ -95,12 +95,6 @@
   const pipCanvas = document.getElementById("fsd-camera-canvas");
   const PIP_W = 320;
   const PIP_H = 180;
-  const PIP_GROUND_Y = 0.05;
-  const PIP_RIBBON = "rgba(34, 211, 238, 0.45)";
-  const PIP_PED = "#22c55e";
-  const PIP_CUT = "#f5c518";
-  const PIP_LIGHT_RED = "#ef4444";
-  const PIP_HORIZON_S = 3;
   if (pipCanvas) {
     pipCanvas.width = PIP_W;
     pipCanvas.height = PIP_H;
@@ -153,30 +147,14 @@
     if (typeof sim.rerouteIfNeeded === "function") sim.rerouteIfNeeded();
   }
 
-  const STEER_LIMIT = 0.85;
-  const LATERAL_KP = 0.45;
-  const LATERAL_KD = 0.15;
-  const LATERAL_PD_LIMIT = 0.20;
-  const DETOUR_STEER = 0.28;
   const LANE_KEEP_OFFSET_M = 1.4;
   const LOOKAHEAD_MIN_M = 4.0;
   const LOOKAHEAD_MAX_M = 8.0;
   const LOOKAHEAD_S = 0.40;
-  const YAW_KD = 0.08;
-  const STEER_SLEW = 0.9;
 
-  function clipSteer(u) {
-    return Math.max(-STEER_LIMIT, Math.min(STEER_LIMIT, u));
-  }
-
-  function lateralPd(uSelected, offsetM, offsetDot) {
-    const u = Number(uSelected) || 0;
-    if (Math.abs(u) > DETOUR_STEER) return clipSteer(u);
-    let pd = LATERAL_KP * offsetM + LATERAL_KD * offsetDot;
-    if (pd > LATERAL_PD_LIMIT) pd = LATERAL_PD_LIMIT;
-    else if (pd < -LATERAL_PD_LIMIT) pd = -LATERAL_PD_LIMIT;
-    return clipSteer(u - pd);
-  }
+  window.SEMIF_APPLY_STEER = function (_player, u) {
+    return u;
+  };
 
   function laneKeepManeuver(selectedOffset, speed) {
     if (
@@ -192,93 +170,6 @@
     );
     return { lane_offset_m: 0, lookahead_m: look };
   }
-
-  function dampenStanleySteer(uSelected, yawRate, prevU, dt) {
-    let u = (Number(uSelected) || 0) - YAW_KD * (Number(yawRate) || 0);
-    const step = Math.max(0.001, Number(dt) || 0.016);
-    if (prevU != null && Number.isFinite(prevU)) {
-      const maxDu = STEER_SLEW * step;
-      const du = u - prevU;
-      if (du > maxDu) u = prevU + maxDu;
-      else if (du < -maxDu) u = prevU - maxDu;
-    }
-    return clipSteer(u);
-  }
-
-  function applySteerCommand(uA, offsetM, offsetDot, yawRate, prevU, dt) {
-    return dampenStanleySteer(lateralPd(uA, offsetM, offsetDot), yawRate, prevU, dt);
-  }
-
-  function laneOffsetM(sim) {
-    const lane =
-      (sim.lastDecisionState && sim.lastDecisionState.lane) ||
-      (sim.lastPlan && sim.lastPlan.lane);
-    if (lane && typeof lane.offset_m === "number" && Number.isFinite(lane.offset_m)) {
-      return lane.offset_m;
-    }
-    return null;
-  }
-
-  function realtimeLaneOffsetM(sim) {
-    const p = sim && sim.player;
-    const route = p && p.route && p.route.points;
-    if (!p || !route || route.length < 2) {
-      const snap = laneOffsetM(sim);
-      return snap == null ? 0 : snap;
-    }
-    const s0 = Number.isFinite(p.s) ? p.s : null;
-    let best = null;
-    let bestD2 = Infinity;
-    for (let i = 0; i < route.length - 1; i++) {
-      const a = route[i];
-      const b = route[i + 1];
-      if (s0 != null && a.s != null && a.s < s0 - 12) continue;
-      if (s0 != null && a.s != null && a.s > s0 + 32) break;
-      const abx = b.x - a.x;
-      const abz = b.z - a.z;
-      const len2 = abx * abx + abz * abz || 1;
-      let t = ((p.x - a.x) * abx + (p.z - a.z) * abz) / len2;
-      if (t < 0) t = 0;
-      else if (t > 1) t = 1;
-      const qx = a.x + abx * t;
-      const qz = a.z + abz * t;
-      const dx = p.x - qx;
-      const dz = p.z - qz;
-      const d2 = dx * dx + dz * dz;
-      if (d2 < bestD2) {
-        bestD2 = d2;
-        const h = Number.isFinite(a.heading) ? a.heading : Math.atan2(abx, -abz);
-        best = dx * Math.cos(h) + dz * Math.sin(h);
-      }
-    }
-    if (best == null) {
-      const snap = laneOffsetM(sim);
-      return snap == null ? 0 : snap;
-    }
-    return best;
-  }
-
-  window.SEMIF_APPLY_STEER = function (player, u) {
-    const sim = window.SEMIF_SIM;
-    if (!sim || !sim.autopilot || sim.paused || sim.crash || !player) return u;
-    const dt = Math.min(Math.max(Number(sim._pdDt) || 0.016, 0.008), 0.05);
-    const offset = realtimeLaneOffsetM(sim);
-    const prevOff = sim._lastOffset;
-    const offsetDot = prevOff == null ? 0 : (offset - prevOff) / dt;
-    sim._lastOffset = offset;
-    const heading = Number(player.heading) || 0;
-    let yaw = 0;
-    if (sim._pdHeading != null && Number.isFinite(sim._pdHeading)) {
-      let d = heading - sim._pdHeading;
-      while (d > Math.PI) d -= Math.PI * 2;
-      while (d < -Math.PI) d += Math.PI * 2;
-      yaw = d / dt;
-    }
-    sim._pdHeading = heading;
-    const out = applySteerCommand(u, offset, offsetDot, yaw, sim._pdU, dt);
-    sim._pdU = out;
-    return out;
-  };
 
   function applyLaneKeepReference(sim) {
     const p = sim && sim.player;
@@ -423,7 +314,7 @@
 
   function renderDecision(data) {
     const meta = data.meta || {};
-    const intent = meta.tier1_maneuver || "SemIf";
+    const intent = meta.tier1_maneuver || "SemArbiter";
     const choice = data.answers && data.answers.vector && data.answers.vector.choice;
     intentEl.textContent = choice ? `${intent} · ${choice}` : String(intent).replace(/_/g, " ");
   }
@@ -574,180 +465,6 @@
     }
   }
 
-  function invertMat4(m) {
-    const a00 = m[0], a01 = m[1], a02 = m[2], a03 = m[3];
-    const a10 = m[4], a11 = m[5], a12 = m[6], a13 = m[7];
-    const a20 = m[8], a21 = m[9], a22 = m[10], a23 = m[11];
-    const a30 = m[12], a31 = m[13], a32 = m[14], a33 = m[15];
-    const b00 = a00 * a11 - a01 * a10;
-    const b01 = a00 * a12 - a02 * a10;
-    const b02 = a00 * a13 - a03 * a10;
-    const b03 = a01 * a12 - a02 * a11;
-    const b04 = a01 * a13 - a03 * a11;
-    const b05 = a02 * a13 - a03 * a12;
-    const b06 = a20 * a31 - a21 * a30;
-    const b07 = a20 * a32 - a22 * a30;
-    const b08 = a20 * a33 - a23 * a30;
-    const b09 = a21 * a32 - a22 * a31;
-    const b10 = a21 * a33 - a23 * a31;
-    const b11 = a22 * a33 - a23 * a32;
-    let det = b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
-    if (!det) return null;
-    det = 1 / det;
-    return [
-      (a11 * b11 - a12 * b10 + a13 * b09) * det,
-      (a02 * b10 - a01 * b11 - a03 * b09) * det,
-      (a31 * b05 - a32 * b04 + a33 * b03) * det,
-      (a22 * b04 - a21 * b05 - a23 * b03) * det,
-      (a12 * b08 - a10 * b11 - a13 * b07) * det,
-      (a00 * b11 - a02 * b08 + a03 * b07) * det,
-      (a32 * b02 - a30 * b05 - a33 * b01) * det,
-      (a20 * b05 - a22 * b02 + a23 * b01) * det,
-      (a10 * b10 - a11 * b08 + a13 * b06) * det,
-      (a01 * b08 - a00 * b10 - a03 * b06) * det,
-      (a30 * b04 - a31 * b02 + a33 * b00) * det,
-      (a21 * b02 - a20 * b04 - a23 * b00) * det,
-      (a11 * b07 - a10 * b09 - a12 * b06) * det,
-      (a00 * b09 - a01 * b07 + a02 * b06) * det,
-      (a31 * b01 - a30 * b03 - a32 * b00) * det,
-      (a20 * b03 - a21 * b01 + a22 * b00) * det,
-    ];
-  }
-
-  function mulMat4(a, b) {
-    const o = new Array(16);
-    for (let c = 0; c < 4; c++) {
-      for (let r = 0; r < 4; r++) {
-        o[c * 4 + r] =
-          a[r] * b[c * 4] +
-          a[4 + r] * b[c * 4 + 1] +
-          a[8 + r] * b[c * 4 + 2] +
-          a[12 + r] * b[c * 4 + 3];
-      }
-    }
-    return o;
-  }
-
-  function applyMat(m, x, y, z, w) {
-    return {
-      x: m[0] * x + m[4] * y + m[8] * z + m[12] * w,
-      y: m[1] * x + m[5] * y + m[9] * z + m[13] * w,
-      z: m[2] * x + m[6] * y + m[10] * z + m[14] * w,
-      w: m[3] * x + m[7] * y + m[11] * z + m[15] * w,
-    };
-  }
-
-  function unprojectGround(camera, px, py, width, height) {
-    if (!camera || !camera.matrixWorldInverse || !camera.projectionMatrix) return null;
-    const inv = invertMat4(mulMat4(camera.projectionMatrix.elements, camera.matrixWorldInverse.elements));
-    if (!inv) return null;
-    const nx = (px / width) * 2 - 1;
-    const ny = 1 - (py / height) * 2;
-    function at(ndcZ) {
-      const p = applyMat(inv, nx, ny, ndcZ, 1);
-      if (!p.w) return null;
-      return { x: p.x / p.w, y: p.y / p.w, z: p.z / p.w };
-    }
-    const a = at(-1);
-    const b = at(1);
-    if (!a || !b) return null;
-    const dy = b.y - a.y;
-    if (Math.abs(dy) < 1e-8) return null;
-    const t = (PIP_GROUND_Y - a.y) / dy;
-    return {
-      x: a.x + (b.x - a.x) * t,
-      y: PIP_GROUND_Y,
-      z: a.z + (b.z - a.z) * t,
-    };
-  }
-
-  function fitContain(srcW, srcH, dstW, dstH) {
-    const sw = Math.max(1, srcW);
-    const sh = Math.max(1, srcH);
-    const scale = Math.min(dstW / sw, dstH / sh);
-    const w = sw * scale;
-    const h = sh * scale;
-    return { x: (dstW - w) / 2, y: (dstH - h) / 2, w: w, h: h, scale: scale };
-  }
-
-  function mapPip(px, py, srcW, srcH, fit) {
-    return {
-      x: fit.x + (px / srcW) * fit.w,
-      y: fit.y + (py / srcH) * fit.h,
-    };
-  }
-
-  function egoRel(player, x, z) {
-    const h = Number(player && player.heading) || 0;
-    const dx = x - (Number(player && player.x) || 0);
-    const dz = z - (Number(player && player.z) || 0);
-    return {
-      rel_x: dx * Math.cos(h) + dz * Math.sin(h),
-      rel_z: dx * Math.sin(h) - dz * Math.cos(h),
-    };
-  }
-
-  function ribbonSpeed(player, maneuver) {
-    if (maneuver && Number.isFinite(Number(maneuver.velocity_mps))) {
-      return Math.max(0, Number(maneuver.velocity_mps));
-    }
-    if (maneuver && Number.isFinite(Number(maneuver.end_speed_mps))) {
-      return Math.max(0, Number(maneuver.end_speed_mps));
-    }
-    return Math.max(0, Number(player && player.speed) || 0);
-  }
-
-  function pointOnRoute(points, s) {
-    let i = 0;
-    if (s > points[0].s) {
-      i = points.length - 2;
-      for (let k = 0; k < points.length - 1; k++) {
-        if (s <= points[k + 1].s) {
-          i = k;
-          break;
-        }
-      }
-    }
-    const a = points[i];
-    const b = points[i + 1];
-    const span = (b.s - a.s) || 1;
-    let t = (s - a.s) / span;
-    if (t < 0) t = 0;
-    else if (t > 1) t = 1;
-    return {
-      x: a.x + (b.x - a.x) * t,
-      z: a.z + (b.z - a.z) * t,
-      heading: Math.atan2(b.x - a.x, -(b.z - a.z)),
-    };
-  }
-
-  function ribbonPoints(player, maneuver) {
-    const speed = ribbonSpeed(player, maneuver);
-    const dist = Math.max(0.5, speed * PIP_HORIZON_S);
-    const offset = maneuver && Number.isFinite(Number(maneuver.lane_offset_m))
-      ? Number(maneuver.lane_offset_m)
-      : 0;
-    const look = Math.max(1, Number(maneuver && maneuver.lookahead_m) || 6);
-    const route = player && player.route && player.route.points;
-    const originS = Number(player && player.s);
-    const pts = [];
-    for (let i = 0; i <= 8; i++) {
-      const along = (dist * i) / 8;
-      const lat = offset * Math.min(1, along / look);
-      if (route && route.length >= 2 && Number.isFinite(originS)) {
-        const pose = pointOnRoute(route, originS + along);
-        const moved = aheadOf(pose, 0, lat);
-        moved.heading = Number.isFinite(Number(pose.heading)) ? Number(pose.heading) : 0;
-        pts.push(moved);
-      } else {
-        const moved = aheadOf(player, along, lat);
-        moved.heading = Number(player.heading) || 0;
-        pts.push(moved);
-      }
-    }
-    return pts;
-  }
-
   const pipFrameMs = [];
   function pipFpsText(now) {
     pipFrameMs.push(now);
@@ -759,122 +476,24 @@
     return Math.round(((pipFrameMs.length - 1) * 1000) / span) + " FPS";
   }
 
-  function pipScene(sim) {
-    if (!sim) return null;
-    return sim.lastDecisionState || null;
+  function fitContain(srcW, srcH, dstW, dstH) {
+    const sw = Math.max(1, srcW);
+    const sh = Math.max(1, srcH);
+    const scale = Math.min(dstW / sw, dstH / sh);
+    const w = sw * scale;
+    const h = sh * scale;
+    return { x: (dstW - w) / 2, y: (dstH - h) / 2, w: w, h: h, scale: scale };
   }
 
-  function paintPip(sim, world, now) {
-    if (!pipCanvas || !pipRoot || pipRoot.classList.contains("fsd-pip-hidden")) return;
+  function showSentFrame(bitmap, now) {
+    if (!pipCanvas || !pipRoot || pipRoot.classList.contains("fsd-pip-hidden") || !bitmap) return;
     const ctx = pipCanvas.getContext("2d");
     if (!ctx) return;
     if (pipFps) pipFps.textContent = pipFpsText(now);
-    const src = world && world.canvas;
-    const srcW = src ? (src.width || src.clientWidth || PIP_W) : PIP_W;
-    const srcH = src ? (src.height || src.clientHeight || PIP_H) : PIP_H;
-    const fit = fitContain(srcW, srcH, PIP_W, PIP_H);
+    const fit = fitContain(bitmap.width, bitmap.height, PIP_W, PIP_H);
     ctx.clearRect(0, 0, PIP_W, PIP_H);
-    if (src) ctx.drawImage(src, fit.x, fit.y, fit.w, fit.h);
-    const camera = world && world.camera;
-    const player = sim && sim.player;
-    if (!camera || !player) return;
-    const maneuver = player.maneuver;
-    const center = ribbonPoints(player, maneuver);
-    const left = [];
-    const right = [];
-    for (const pt of center) {
-      const pose = {
-        x: pt.x,
-        z: pt.z,
-        heading: Number.isFinite(pt.heading) ? pt.heading : (player.heading || 0),
-      };
-      const l = aheadOf(pose, 0, -0.9);
-      const r = aheadOf(pose, 0, 0.9);
-      const pl = project(camera, l.x, PIP_GROUND_Y, l.z, srcW, srcH);
-      const pr = project(camera, r.x, PIP_GROUND_Y, r.z, srcW, srcH);
-      if (!pl || !pr) continue;
-      left.push(mapPip(pl.x, pl.y, srcW, srcH, fit));
-      right.push(mapPip(pr.x, pr.y, srcW, srcH, fit));
-    }
-    if (left.length >= 2 && right.length >= 2) {
-      ctx.beginPath();
-      ctx.fillStyle = PIP_RIBBON;
-      ctx.moveTo(left[0].x, left[0].y);
-      for (let i = 1; i < left.length; i++) ctx.lineTo(left[i].x, left[i].y);
-      for (let i = right.length - 1; i >= 0; i--) ctx.lineTo(right[i].x, right[i].y);
-      ctx.closePath();
-      ctx.fill();
-    }
-    const marks = []
-      .concat(sim.pedestrians || [])
-      .concat(sim._fsdAgents || [])
-      .concat((sim.traffic || []).filter((obj) => obj && (obj.hazardLights || obj._fsd === "cutin")));
-    for (const obj of marks) {
-      const d = dist2(obj, player);
-      if (d > 55) continue;
-      const top = project(camera, obj.x, obj.height || 1.6, obj.z, srcW, srcH);
-      const bot = project(camera, obj.x, PIP_GROUND_Y, obj.z, srcW, srcH);
-      if (!top || !bot) continue;
-      const topM = mapPip(top.x, top.y, srcW, srcH, fit);
-      const botM = mapPip(bot.x, bot.y, srcW, srcH, fit);
-      const boxH = Math.max(8, Math.abs(botM.y - topM.y));
-      const boxW = Math.max(6, boxH * 0.45);
-      const leftX = topM.x - boxW / 2;
-      const topY = Math.min(topM.y, botM.y);
-      const ped = obj.type === "pedestrian" || obj._fsd === "pedestrian";
-      const cut = obj._fsd === "cutin";
-      const tau = Number.isFinite(Number(obj._cut)) ? Number(obj._cut) : d / Math.max(0.5, Number(obj.speed) || 1);
-      let stroke = ped ? PIP_PED : PIP_CUT;
-      if (cut && tau < 1.5) stroke = PIP_LIGHT_RED;
-      ctx.strokeStyle = stroke;
-      ctx.strokeRect(leftX, topY, boxW, boxH);
-      const contactX = leftX + boxW / 2;
-      const contactY = Math.max(topM.y, botM.y);
-      ctx.beginPath();
-      ctx.moveTo(contactX - 4, contactY);
-      ctx.lineTo(contactX + 4, contactY);
-      ctx.moveTo(contactX, contactY - 4);
-      ctx.lineTo(contactX, contactY + 4);
-      ctx.stroke();
-      const srcContactX = ((contactX - fit.x) / fit.w) * srcW;
-      const srcContactY = ((contactY - fit.y) / fit.h) * srcH;
-      const ground = unprojectGround(camera, srcContactX, srcContactY, srcW, srcH);
-      const rel = ground ? egoRel(player, ground.x, ground.z) : egoRel(player, obj.x, obj.z);
-      const where = "(" + rel.rel_x.toFixed(1) + ", " + rel.rel_z.toFixed(1) + ")";
-      ctx.fillStyle = stroke;
-      if (ped) ctx.fillText("PED " + d.toFixed(1) + "m", leftX, topY - 4);
-      else if (cut) ctx.fillText("CUT-IN " + d.toFixed(1) + "m · tau " + tau.toFixed(1) + "s", leftX, topY - 4);
-      else ctx.fillText("VEH " + d.toFixed(1) + "m", leftX, topY - 4);
-      ctx.fillText(where, contactX + 6, contactY);
-    }
-    const scene = pipScene(sim);
-    const inter = scene && scene.scene && scene.scene.intersection;
-    const line = inter && inter.stop_line_position;
-    if (line && inter.visible !== false && inter.signal) {
-      const sig = String(inter.signal).toLowerCase();
-      let color = "#22c55e";
-      if (sig === "red") color = PIP_LIGHT_RED;
-      else if (sig === "amber" || sig === "yellow") color = "#f5c518";
-      const lamp = project(camera, Number(line.x) || 0, 4.2, Number(line.z) || 0, srcW, srcH);
-      if (lamp) {
-        const m = mapPip(lamp.x, lamp.y, srcW, srcH, fit);
-        ctx.beginPath();
-        ctx.strokeStyle = color;
-        ctx.fillStyle = color;
-        ctx.arc(m.x, m.y, 6, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-    }
+    ctx.drawImage(bitmap, fit.x, fit.y, fit.w, fit.h);
   }
-
-  window.SEMIF_PIP = {
-    project: project,
-    unprojectGround: unprojectGround,
-    fitContain: fitContain,
-    egoRel: egoRel,
-    ribbonPoints: ribbonPoints,
-    paintPip: paintPip,
-  };
 
   function tick() {
     const sim = window.SEMIF_SIM;
@@ -914,11 +533,6 @@
       const seed = sim.world && sim.world.seed;
       if (seed != null && document.activeElement !== seedInput) seedInput.value = String(seed);
       drawBoxes(sim, world);
-      try {
-        paintPip(sim, world, performance.now());
-      } catch (_err) {
-        /* PIP must not kill the drive loop */
-      }
     }
     requestAnimationFrame(tick);
   }
@@ -935,8 +549,11 @@
     tmp.width = w;
     tmp.height = h;
     tmp.getContext("2d").drawImage(canvas, 0, 0, w, h);
+    showSentFrame(tmp, performance.now());
     return tmp.toDataURL("image/jpeg", 0.55);
   }
+
+  window.SEMIF_GRAB_FRAME = grabFrame;
 
   async function visionTick() {
     if (!visionOn) {

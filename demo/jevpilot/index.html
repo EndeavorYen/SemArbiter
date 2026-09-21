@@ -9,9 +9,9 @@
     <meta name="theme-color" content="#0a0d14" />
     <meta
       name="description"
-      content="Playable 3D autonomous driving simulator powered by local SemIf semantic decision engine."
+      content="Playable 3D autonomous driving simulator powered by local SemArbiter."
     />
-    <title>SemIf JevPilot — Autonomous Driving Simulator (RTX 5080 · 12ms)</title>
+    <title>SemArbiter JevPilot — Autonomous Driving Simulator (RTX 5080 · 12ms)</title>
     <style>
       #scene-loader{z-index:1000;color:#f1f5f9;text-align:center;background:#0a0d14;place-content:center;justify-items:center;gap:16px;padding:24px;font:14px system-ui,sans-serif;display:grid;position:fixed;inset:0}
       #scene-loader[hidden],#scene-loader [hidden]{display:none}
@@ -28,16 +28,26 @@
         window.SEMIF_RAW_MODE = q.get("raw") === "1" || q.get("rawMode") === "1";
         var seed = q.get("seed");
         window.SEMIF_SEED = seed && isFinite(Number(seed)) ? Number(seed) : null;
+        var proto = HTMLCanvasElement.prototype;
+        var origGetContext = proto.getContext;
+        proto.getContext = function (kind, attrs) {
+          if (kind === "webgl" || kind === "webgl2" || kind === "experimental-webgl") {
+            var next = Object.assign({}, attrs || {});
+            next.preserveDrawingBuffer = true;
+            return origGetContext.call(this, kind, next);
+          }
+          return origGetContext.call(this, kind, attrs);
+        };
       })();
     </script>
     <link rel="stylesheet" href="/jevpilot/semif-layer.css" />
-    <script type="module" crossorigin src="/jevpilot/assets/index-DC8fTtby.js?v=20260921d"></script>
+    <script type="module" crossorigin src="/jevpilot/assets/index-DC8fTtby.js?v=20260922b"></script>
     <script src="/jevpilot/semif-telemetry.js?v=20260921i"></script>
-    <script src="/jevpilot/semif-layer.js?v=20260922a" defer></script>
+    <script src="/jevpilot/semif-layer.js?v=20260922b" defer></script>
   </head>
   <body class="loading">
     <div id="scene-loader" role="status" aria-live="polite">
-      <strong>⚡ Loading SemIf JevPilot…</strong>
+      <strong>⚡ Loading SemArbiter JevPilot…</strong>
       <p id="loading-message">Preparing Cedar Town, Millbrook & Interstate 08…</p>
       <span class="loading-spinner" aria-hidden="true"></span>
       <button id="loading-retry" hidden>Try again</button>
