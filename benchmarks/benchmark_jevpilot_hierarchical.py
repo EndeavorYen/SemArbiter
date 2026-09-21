@@ -336,6 +336,7 @@ class JevPilot2Simulator:
         )
         u_sel = float(target_steer)
         if abs(u_sel) <= DETOUR_STEER:
+            # Plant: x += steer * v * dt * 2.0; x -= kappa * v * dt * 1.5. Hold x with steer = (1.5/2) * kappa.
             u_sel = (1.5 / 2.0) * float(self.track_curvature)
         target_steer = lateral_pd(u_sel, self.x, offset_dot)
         steer_delta = abs(target_steer - self.steer_angle)
