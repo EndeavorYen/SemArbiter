@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from benchmarks.benchmark_jevpilot_hierarchical import evaluate_jevpilot2_mode
 from benchmarks.driving_quality import compare_driving
 from demo.server import DecisionEngine
+from semif_phase1.latency_telemetry import align_web_export, summarize_latency
 
 
 def main() -> None:
@@ -24,6 +25,11 @@ def main() -> None:
     parser.add_argument("--episodes", type=int, default=2)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--output", default="results/phase5-jevpilot-vision-mock.json")
+    parser.add_argument(
+        "--web-telemetry",
+        default=None,
+        help="Path to SEMIF_TELEMETRY.exportJSON() dump for Web vs local latency alignment",
+    )
     args = parser.parse_args()
 
     engine = DecisionEngine(use_mock=args.mock, device=None if args.mock else "cuda")
@@ -67,6 +73,28 @@ def main() -> None:
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "arms": arms,
     }
+    if args.web_telemetry:
+        web = json.loads(Path(args.web_telemetry).read_text(encoding="utf-8"))
+        local_samples = []
+        payload = {
+            "mode": "flat",
+            "state": {
+                "speed_mps": 12.0,
+                "candidates": {
+                    "t00": [12.0, 0.0, 0.0, 0.0, False, False],
+                    "t01": [0.0, 0.0, 0.0, 0.0, False, True],
+                },
+            },
+            "questions": {
+                "vector": {"type": "choice", "criteria": {"t00": None, "t01": None}},
+            },
+        }
+        for _ in range(8):
+            local_samples.append(float(engine.classify_jev(payload)["classifier_ms"]))
+        report["web_alignment"] = align_web_export(
+            web,
+            {"classifier_ms": summarize_latency(local_samples)},
+        )
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
     Path(args.output).write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(json.dumps({

@@ -23,6 +23,8 @@
       <button type="button" id="fsd-seed-rand">Random</button>
       <span id="fsd-intent">SemIf</span>
       <span id="fsd-vision">VISION off</span>
+      <span id="fsd-latency">e2e —  P50 —  P95 —</span>
+      <button type="button" id="fsd-latency-export">Export latency</button>
     </div>
   `;
   document.body.appendChild(chrome);
@@ -32,8 +34,33 @@
   const seedInput = document.getElementById("fsd-seed-input");
   const visionEl = document.getElementById("fsd-vision");
   const intentEl = document.getElementById("fsd-intent");
+  const latencyEl = document.getElementById("fsd-latency");
   const visionOn = params.get("vision") !== "0";
   window.SEMIF_VISION = null;
+
+  const telemetryCore = window.SEMIF_TELEMETRY_CORE;
+  const telemetry = telemetryCore && telemetryCore.createLatencyTelemetry
+    ? telemetryCore.createLatencyTelemetry()
+    : null;
+  window.SEMIF_TELEMETRY = telemetry;
+
+  function refreshLatencyHud() {
+    if (latencyEl && telemetry && typeof telemetry.hudText === "function") {
+      latencyEl.textContent = telemetry.hudText();
+    }
+  }
+
+  document.getElementById("fsd-latency-export").addEventListener("click", () => {
+    if (!telemetry || typeof telemetry.exportJSON !== "function") return;
+    const blob = new Blob([JSON.stringify(telemetry.exportJSON(), null, 2)], {
+      type: "application/json",
+    });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "semif-web-latency.json";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
 
   function reloadWithSeed(seed) {
     const q = new URLSearchParams(location.search);
@@ -280,6 +307,7 @@
       } catch (_err) {
         /* leave request unchanged */
       }
+      const tClass = performance.now();
       return origFetch(url, opts).then(async (res) => {
         let data;
         try {
@@ -291,6 +319,15 @@
           data = fillJevAnswers(data, JSON.parse(opts.body));
         } catch (_err) {
           /* keep server JSON */
+        }
+        if (telemetry && data) {
+          const rtt = performance.now() - tClass;
+          const cls = Number(data.classifier_ms != null ? data.classifier_ms : (data.meta && data.meta.classifier_ms));
+          telemetry.recordClassifier({
+            classifier_ms: Number.isFinite(cls) ? cls : rtt,
+            rtt_ms: rtt,
+          });
+          refreshLatencyHud();
         }
         if (data && data.meta) renderDecision(data);
         return new Response(JSON.stringify(data), {
@@ -558,20 +595,35 @@
       visionEl.textContent = "VISION off";
       return;
     }
+    const tGrab = performance.now();
     const dataUrl = grabFrame();
+    const grabMs = performance.now() - tGrab;
     if (!dataUrl) {
       visionEl.textContent = "VISION waiting";
       return;
     }
     try {
+      const tVis = performance.now();
       const res = await origFetch("/v1/vision", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ image: dataUrl }),
       });
       const data = await res.json();
+      const rttMs = performance.now() - tVis;
       const vis = data.vision || data;
       window.SEMIF_VISION = vis;
+      if (telemetry) {
+        const encode = Number(
+          data.vision_encode_ms != null ? data.vision_encode_ms : vis.latency_ms
+        );
+        telemetry.recordVision({
+          encode_ms: Number.isFinite(encode) ? encode : rttMs,
+          rtt_ms: rttMs,
+          grab_ms: grabMs,
+        });
+        refreshLatencyHud();
+      }
       const sig = vis.signal || "unknown";
       visionEl.textContent = vis.event
         ? ["VISION", vis.event].join(" · ")

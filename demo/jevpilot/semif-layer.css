@@ -187,7 +187,7 @@ body.fsd-theme .vector-label.selected {
   flex-wrap: wrap;
   gap: 8px 12px;
   align-items: center;
-  max-width: min(560px, 72vw);
+  max-width: min(720px, 84vw);
   padding: 7px 12px;
   background: var(--fsd-bg);
   border: 1px solid var(--fsd-line);
@@ -195,6 +195,23 @@ body.fsd-theme .vector-label.selected {
   color: var(--fsd-ink);
   font-size: 11px;
   letter-spacing: 0.03em;
+}
+
+#fsd-latency {
+  color: var(--fsd-muted);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+#fsd-latency-export {
+  pointer-events: auto;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  border: 1px solid var(--fsd-line);
+  border-radius: 6px;
+  padding: 2px 8px;
+  font: inherit;
+  cursor: pointer;
 }
 
 #fsd-seed-box {

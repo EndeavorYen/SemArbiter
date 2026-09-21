@@ -314,3 +314,54 @@ def test_v1_classifier_speed_ceiling_governor(mock_engine):
     assert data["meta"]["true_ood"] is False
     assert data["answers"]["vector"]["choice"] in {"v_fast", "v_govern"} or data["answers"]["vector"]["choice"] in data["answers"]["vector"]["probabilities"]
 
+
+def _tiny_jpeg_data_url() -> str:
+    from io import BytesIO
+
+    from PIL import Image
+
+    buf = BytesIO()
+    Image.new("RGB", (8, 8), (40, 80, 40)).save(buf, format="JPEG", quality=40)
+    import base64
+
+    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+def test_v1_classifier_returns_classifier_ms(mock_engine):
+    client = TestClient(app)
+    data = client.post(
+        "/v1/classifier",
+        json={
+            "mode": "flat",
+            "state": {
+                "speed_mps": 12.0,
+                "candidates": {
+                    "v0": [12.0, 0.0, 0.1, 0.0, False, False],
+                    "v1": [8.0, 0.0, 0.2, 0.0, False, False],
+                },
+            },
+            "questions": {
+                "vector": {
+                    "type": "choice",
+                    "criteria": {"v0": None, "v1": None},
+                }
+            },
+        },
+    ).json()
+    assert isinstance(data["classifier_ms"], float)
+    assert data["classifier_ms"] >= 0.0
+    assert isinstance(data["meta"]["classifier_ms"], float)
+    assert data["meta"]["classifier_ms"] >= 0.0
+    assert data["classifier_ms"] == data["meta"]["classifier_ms"]
+
+
+def test_v1_vision_returns_vision_encode_ms(mock_engine):
+    client = TestClient(app)
+    resp = client.post("/v1/vision", json={"image": _tiny_jpeg_data_url()})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "error" not in data
+    assert isinstance(data["vision_encode_ms"], float)
+    assert data["vision_encode_ms"] >= 0.0
+    assert "vision" in data
+
