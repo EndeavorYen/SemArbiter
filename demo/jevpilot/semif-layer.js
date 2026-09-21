@@ -17,7 +17,7 @@
     <div id="fsd-boxes"></div>
     <div id="fsd-pip">
       <div class="fsd-pip-header">
-        <span class="fsd-pip-title">CAMERA: vision frame</span>
+        <span class="fsd-pip-title">CAMERA: onboard</span>
         <span id="fsd-pip-fps" class="fsd-pip-fps">-- FPS</span>
       </div>
       <div class="fsd-pip-body">
@@ -476,23 +476,78 @@
     return Math.round(((pipFrameMs.length - 1) * 1000) / span) + " FPS";
   }
 
-  function fitContain(srcW, srcH, dstW, dstH) {
-    const sw = Math.max(1, srcW);
-    const sh = Math.max(1, srcH);
-    const scale = Math.min(dstW / sw, dstH / sh);
-    const w = sw * scale;
-    const h = sh * scale;
-    return { x: (dstW - w) / 2, y: (dstH - h) / 2, w: w, h: h, scale: scale };
+  function onboardMount(player, rig) {
+    const eye = (rig && rig.userData) || {};
+    const ahead = eye.eyeForward == null ? 0.15 : Number(eye.eyeForward);
+    const height = eye.eyeHeight || 1.27;
+    const h = Number(player.heading) || 0;
+    const x = player.x + Math.sin(h) * ahead - Math.cos(h) * 0.3;
+    const z = player.z - Math.cos(h) * ahead - Math.sin(h) * 0.3;
+    return {
+      x: x,
+      y: height,
+      z: z,
+      lookX: x + Math.sin(h) * 25,
+      lookY: height,
+      lookZ: z - Math.cos(h) * 25,
+    };
   }
 
-  function showSentFrame(bitmap, now) {
-    if (!pipCanvas || !pipRoot || pipRoot.classList.contains("fsd-pip-hidden") || !bitmap) return;
+  function paintOnboardPixels(pixels) {
     const ctx = pipCanvas.getContext("2d");
     if (!ctx) return;
-    if (pipFps) pipFps.textContent = pipFpsText(now);
-    const fit = fitContain(bitmap.width, bitmap.height, PIP_W, PIP_H);
-    ctx.clearRect(0, 0, PIP_W, PIP_H);
-    ctx.drawImage(bitmap, fit.x, fit.y, fit.w, fit.h);
+    const image = ctx.createImageData(PIP_W, PIP_H);
+    const row = PIP_W * 4;
+    for (let y = 0; y < PIP_H; y++) {
+      const src = (PIP_H - 1 - y) * row;
+      image.data.set(pixels.subarray(src, src + row), y * row);
+    }
+    ctx.putImageData(image, 0, 0);
+  }
+
+  function renderOnboard(world) {
+    const player = world && world.sim && world.sim.player;
+    const renderer = world && world.renderer;
+    const scene = world && world.scene;
+    const sample = world && world.sun && world.sun.shadow && world.sun.shadow.map;
+    if (!player || !renderer || !scene || !sample || !world.camera || !pipCanvas) return false;
+    const mount = onboardMount(player, world.player);
+    if (!world._onboardCam) world._onboardCam = world.camera.clone();
+    const cam = world._onboardCam;
+    cam.fov = 60;
+    cam.aspect = PIP_W / PIP_H;
+    cam.position.set(mount.x, mount.y, mount.z);
+    cam.lookAt(mount.lookX, mount.lookY, mount.lookZ);
+    if (cam.updateProjectionMatrix) cam.updateProjectionMatrix();
+    if (cam.updateMatrixWorld) cam.updateMatrixWorld();
+    if (!world._onboardTarget) {
+      world._onboardTarget = new sample.constructor(PIP_W, PIP_H);
+    }
+    const hidden = [];
+    if (world.player && world.player.traverse) {
+      world.player.traverse((obj) => {
+        if (obj.isMesh && obj.material && obj.material.name === "Glass" && obj.visible) {
+          hidden.push(obj);
+          obj.visible = false;
+        }
+      });
+    }
+    const prev = renderer.getRenderTarget ? renderer.getRenderTarget() : null;
+    try {
+      renderer.setRenderTarget(world._onboardTarget);
+      renderer.render(scene, cam);
+      const pixels = new Uint8Array(PIP_W * PIP_H * 4);
+      if (renderer.readRenderTargetPixels) {
+        renderer.readRenderTargetPixels(world._onboardTarget, 0, 0, PIP_W, PIP_H, pixels);
+      }
+      paintOnboardPixels(pixels);
+    } finally {
+      if (renderer.setRenderTarget) renderer.setRenderTarget(prev);
+      hidden.forEach((obj) => {
+        obj.visible = true;
+      });
+    }
+    return true;
   }
 
   function tick() {
@@ -541,16 +596,9 @@
 
   function grabFrame() {
     const world = window.SEMIF_WORLD;
-    const canvas = (world && world.canvas) || document.getElementById("world-canvas");
-    if (!canvas || !canvas.toDataURL) return null;
-    const tmp = document.createElement("canvas");
-    const w = 320;
-    const h = Math.max(64, Math.round((canvas.height / Math.max(canvas.width, 1)) * w));
-    tmp.width = w;
-    tmp.height = h;
-    tmp.getContext("2d").drawImage(canvas, 0, 0, w, h);
-    showSentFrame(tmp, performance.now());
-    return tmp.toDataURL("image/jpeg", 0.55);
+    if (!renderOnboard(world) || !pipCanvas) return null;
+    if (pipFps) pipFps.textContent = pipFpsText(performance.now());
+    return pipCanvas.toDataURL("image/jpeg", 0.55);
   }
 
   window.SEMIF_GRAB_FRAME = grabFrame;

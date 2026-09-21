@@ -19,7 +19,7 @@ OVERLAY_CSS = REPO / "demo" / "jevpilot" / "semif-layer.css"
 
 PIP_W = 320
 PIP_H = 180
-TITLE = "CAMERA: vision frame"
+TITLE = "CAMERA: onboard"
 
 
 def _perspective(fov_deg: float, aspect: float, near: float, far: float) -> list[float]:
@@ -68,6 +68,8 @@ function makeCtx(canvas) {
     strokeRect(x, y, w, h) { ops.push({ op: "strokeRect", x, y, w, h, strokeStyle }); },
     fillRect(x, y, w, h) { ops.push({ op: "fillRect", x, y, w, h, fillStyle }); },
     fillText(text, x, y) { ops.push({ op: "fillText", text: String(text), x, y, fillStyle }); },
+    createImageData(w, h) { return { data: new Uint8ClampedArray(w * h * 4), width: w, height: h }; },
+    putImageData() { ops.push({ op: "putImageData" }); },
     drawImage(src, dx, dy, dw, dh) { ops.push({ op: "drawImage", dx, dy, dw, dh }); },
     setLineWidth() {},
     measureText(text) { return { width: String(text).length * 6 }; },
@@ -317,17 +319,57 @@ if (spec.cmd === "dom") {
   process.stdout.write(JSON.stringify(pts));
 } else if (spec.cmd === "grab") {
   const worldCanvas = el("canvas");
-  worldCanvas.width = spec.srcW;
-  worldCanvas.height = spec.srcH;
-  window.SEMIF_WORLD = { canvas: worldCanvas };
+  worldCanvas.toDataURL = () => "data:image/jpeg;base64,PLAYER";
+  canvas.toDataURL = () => "data:image/jpeg;base64,ONBOARD";
+  const shots = [];
+  function makeCam() {
+    const cam = {
+      fov: 52,
+      aspect: 1,
+      position: { x: 0, y: 0, z: 0, set(x, y, z) { this.x = x; this.y = y; this.z = z; } },
+      lookAt(x, y, z) { this.look = { x, y, z }; },
+      updateProjectionMatrix() {},
+      updateMatrixWorld() {},
+    };
+    cam.clone = () => makeCam();
+    return cam;
+  }
+  function RT(w, h) { this.w = w; this.h = h; this.isWebGLRenderTarget = true; }
+  const world = {
+    mode: "map",
+    canvas: worldCanvas,
+    scene: {},
+    player: { traverse() {} },
+    sim: { player: { x: 10, z: -4, heading: Math.PI / 2 } },
+    camera: makeCam(),
+    sun: { shadow: { map: { constructor: RT } } },
+    renderer: {
+      getRenderTarget() { return null; },
+      setRenderTarget(target) { shots.push({ op: "target", w: target && target.w, h: target && target.h }); },
+      render(_scene, cam) {
+        shots.push({ op: "render", x: cam.position.x, y: cam.position.y, z: cam.position.z, fov: cam.fov, look: cam.look });
+      },
+      readRenderTargetPixels(_t, _x, _y, w, h, buf) { buf.fill(8); },
+    },
+  };
+  window.SEMIF_WORLD = world;
   canvas.__ctx.ops.length = 0;
   nowMs = 0;
   const url = window.SEMIF_GRAB_FRAME();
-  nowMs = 500;
+  const first = shots.filter((s) => s.op === "render").pop();
+  world.mode = "chase";
   window.SEMIF_GRAB_FRAME();
+  const second = shots.filter((s) => s.op === "render").pop();
   nowMs = 1000;
   window.SEMIF_GRAB_FRAME();
-  process.stdout.write(JSON.stringify({ ops: plainOps(canvas.__ctx.ops), url, fps: fps.textContent }));
+  process.stdout.write(JSON.stringify({
+    url,
+    mode: world.mode,
+    first,
+    second,
+    ops: plainOps(canvas.__ctx.ops),
+    fps: fps.textContent,
+  }));
 } else if (spec.cmd === "keys") {
   const beforeHidden = pip.classList.contains("fsd-pip-hidden");
   const beforeFold = pip.classList.contains("fsd-pip-collapsed");
@@ -394,22 +436,26 @@ def test_pip_shell_is_in_the_loaded_overlay():
     assert "fsd-pip-hidden" in css
 
 
-def test_pip_shows_the_frame_grab_posts_to_vision():
-    """The window is the bitmap grabFrame encodes, not simulator coordinates."""
-    grabbed = _run({"cmd": "grab", "srcW": 640, "srcH": 480})
-    ops = grabbed["ops"]
-    images = [op for op in ops if op["op"] == "drawImage"]
-    assert images
-    assert images[-1]["dx"] == pytest.approx(40)
-    assert images[-1]["dw"] == pytest.approx(240)
-    assert images[-1]["dh"] == pytest.approx(PIP_H)
-    assert grabbed["url"].startswith("data:image/jpeg")
-    assert not any(op["op"] in {"fillText", "strokeRect", "arc"} for op in ops)
-    assert grabbed["fps"] == "2 FPS"
+def test_pip_shows_the_fixed_onboard_camera_not_the_player_view():
+    """Change camera is the player view. The posted frame stays on the car."""
+    grabbed = _run({"cmd": "grab"})
+    assert grabbed["url"] == "data:image/jpeg;base64,ONBOARD"
+    assert grabbed["mode"] == "chase"
+    shot = grabbed["first"]
+    assert shot["fov"] == 60
+    assert shot["x"] == pytest.approx(10.15)
+    assert shot["y"] == pytest.approx(1.27)
+    assert shot["z"] == pytest.approx(-4.3)
+    assert shot["look"]["x"] == pytest.approx(10.15 + 25)
+    assert shot["look"]["z"] == pytest.approx(-4.3)
+    again = grabbed["second"]
+    assert again["x"] == pytest.approx(shot["x"])
+    assert again["z"] == pytest.approx(shot["z"])
+    assert any(op["op"] == "putImageData" for op in grabbed["ops"])
+    assert not any(op["op"] == "drawImage" for op in grabbed["ops"])
     js = OVERLAY_JS.read_text(encoding="utf-8")
     vision = js.split("async function visionTick")[1].split("if (visionOn)")[0]
     assert "grabFrame()" in vision
-    assert "showSentFrame" not in vision
 
 
 def test_v_and_header_toggle_without_stealing_seed_input():
