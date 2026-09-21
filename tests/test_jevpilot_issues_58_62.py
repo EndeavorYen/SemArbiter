@@ -136,7 +136,9 @@ def test_bundle_hooks_raw_mode_and_sim():
     assert "window.SEMIF_APPLY_STEER" in main
     assert "⚠️ Flat LLM" not in main
     assert "id:`semif`" in main and "id:`heuristic`" in main
-    assert "https://github.com/EndeavorYen/SemIf" in main
+    assert "https://github.com/EndeavorYen/SemArbiter" in main
+    assert "https://github.com/EndeavorYen/SemIf" not in main
+    assert "SemArbiter JevPilot" in main
     assert "https://standardagents.ai/" not in main
     assert "Digit2`&&cg(`raw_flat`)" not in main
     assert "if(!t){t=lh(e)" in main

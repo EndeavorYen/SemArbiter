@@ -144,6 +144,62 @@ body.fsd-theme .vector-label.selected {
   pointer-events: none;
 }
 
+#fsd-pip {
+  pointer-events: auto;
+  position: fixed;
+  right: 16px;
+  bottom: calc(var(--dock-height, 96px) + 16px);
+  width: 280px;
+  z-index: 5;
+  background: var(--fsd-bg);
+  border: 1px solid var(--fsd-line);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(18px);
+  color: var(--fsd-ink);
+}
+
+.fsd-pip-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 8px;
+  cursor: pointer;
+  font-size: 10px;
+  letter-spacing: 0.03em;
+}
+
+.fsd-pip-title {
+  font-weight: 650;
+}
+
+.fsd-pip-fps {
+  color: var(--fsd-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.fsd-pip-body {
+  padding: 0 8px 8px;
+}
+
+#fsd-camera-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #05060a;
+  border-radius: 8px;
+}
+
+#fsd-pip.fsd-pip-collapsed .fsd-pip-body {
+  display: none;
+}
+
+#fsd-pip.fsd-pip-hidden {
+  display: none;
+}
+
 .fsd-box {
   position: absolute;
   border: 1.5px solid rgba(62, 106, 225, 0.9);
@@ -265,5 +321,16 @@ body.fsd-theme .vector-label.selected {
     right: 10px;
     max-width: none;
     border-radius: 14px;
+  }
+  #fsd-pip {
+    right: 10px;
+    bottom: 168px;
+    width: min(280px, calc(100vw - 20px));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #fsd-pip {
+    transition: none;
   }
 }
