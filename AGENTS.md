@@ -12,6 +12,12 @@
 
 Lead with the answer. Then say why, in short sentences. A longer sentence is fine after the point is already clear. Define a project term the first time it appears. Do not stack labels, tables, or file dumps in front of the conclusion. Do not dress a guess as a measured result.
 
+# What this project is for
+
+This repository exists to remove failure modes of a Jev-style decision model on the path a product calls. That path is the closed-loop drive, `DecisionEngine.decide`, and `DecisionEngine._score_neural_options` behind `/v1/classifier` and `/v1/systemone`. A failure is fixed only when a test calls that live function, fails while the failure is still present, and the observable decision changes: argmax aligned by option id, abstain, or the control output.
+
+A CLI flag, a tutorial, or a row in `docs/RESULTS.md` does not close the failure. Describe option order, calibration, confidence, abstention, or invariance as solved only when that live path runs the change at its default settings. Rewrite a claim that says otherwise. A benchmark that cannot change a live decision is not a deliverable.
+
 # Evaluation honesty
 
 JevPilot executors are Heuristic and Flat SemIf only. Both see the same sampled trajectories this frame. SemIf uses sliced-head readout and n-way prior. Hierarchical-as-pruning was retired for JevPilot (insight in docs/tutorials/10_jev_vs_classifier_io.md). Do not delete trajectories with a coarse tree. Constrain output schema, not the candidate set. Web and the Python loop share the option contract (no signal-injected candidates, six-column vectors, `VECTOR_INSTRUCTIONS`); they do not share a world. Official scores are the closed loop.
