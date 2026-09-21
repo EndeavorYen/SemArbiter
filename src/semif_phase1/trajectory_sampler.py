@@ -83,6 +83,8 @@ def compact_jev_state(state: Any) -> Dict[str, Any]:
 
 # csv = shortest. words = 512-bucket Pareto default. verbose = richer English, 1024 bucket.
 OPTION_TAG_STYLE = os.environ.get("SEMIF_OPTION_TAG", "words")
+# Absolute end_x gate for a center tag. Relative later+0.05<now is blind near 0.
+CENTER_ABS_M = 0.08
 
 
 def vector_option_tag(
@@ -104,7 +106,7 @@ def vector_option_tag(
     if ego_x is not None:
         now = abs(float(ego_x))
         later = abs(end_x)
-        if later + 0.05 < now:
+        if later <= CENTER_ABS_M or later + 0.05 < now:
             centering = "centering"
         elif later > now + 0.05:
             centering = "diverging"

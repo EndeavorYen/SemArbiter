@@ -21,3 +21,13 @@ Keep geometric slow and stop trajectories in the pool for every mode. Do not inj
 Headline driving metric is clean completion (finished with no collision, red-light, pedestrian hit, or off-track). OOD recall only counts true sensor corruption. OOD false positives must be zero. Deprecated SDI is not the ranking key.
 
 Mock code is not GPU evidence. A claim about model driving needs a CUDA run written to a new path, with `device: cuda` and no `MockDecisionEngine`.
+
+# How to change code
+
+Write the failing test first. Watch it fail for the reason you care about. Then write the minimum production code. If you did not see the test fail, it does not test the bug.
+
+The test must call the live branch: the function the runtime actually invokes. A helper that an early return never reaches is dead. Delete it, or move the work onto the live path. Name a function for what it still does.
+
+A string grep (`"foo" in file`) is only for hooks and cache pins. It is not proof a branch executes. Duplicate constants across languages must be locked by a test that reads both sources.
+
+Do not claim a fix from reading the file. Run `pytest -q` on the tests that encode the acceptance. A browser claim needs a browser check. A CUDA claim needs a CUDA run to a new path. If the test cannot fail when the bug is present, it is not a test of the bug.
