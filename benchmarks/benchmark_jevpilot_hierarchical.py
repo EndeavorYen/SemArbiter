@@ -175,6 +175,31 @@ class JevPilot2Simulator:
         self.steering_deltas: List[float] = []
         self.speeds: List[float] = []
 
+    def ground_truth_obstacles(self) -> List[Dict[str, Any]]:
+        """Ego-frame boxes from the simulator. --fast uses this instead of empty IPM."""
+        out: List[Dict[str, Any]] = []
+
+        def add(kind: str, x: float, z: float) -> None:
+            out.append(
+                {
+                    "kind": kind,
+                    "rel_x": round(float(x) - self.x, 2),
+                    "rel_z": round(float(z) - self.z, 2),
+                }
+            )
+
+        if self.pedestrian:
+            add("pedestrian", self.pedestrian["x"], self.pedestrian["z"])
+        if self.roadside_obstacle:
+            add("roadside", self.roadside_obstacle["x"], self.roadside_obstacle["z"])
+        if self.cut_in_vehicle:
+            add("vehicle", self.cut_in_vehicle["x"], self.cut_in_vehicle["z"])
+        if self.other_vehicle:
+            add("vehicle", self.other_vehicle["x"], self.other_vehicle["z"])
+        if self.construction:
+            add("roadside", self.construction["x"], self.construction["z"])
+        return out
+
     def get_observation(self) -> Dict[str, Any]:
         dist_to_line = None
         if self.intersection:
@@ -231,8 +256,11 @@ class JevPilot2Simulator:
         from semif_phase1.ipm import camera_obstacles_from_blobs
         from semif_phase1.vision import blobs_from_frame, render_scenario_frame
 
-        frame = render_scenario_frame(self.scenario_type, self)
-        obstacles = camera_obstacles_from_blobs(blobs_from_frame(frame))
+        if getattr(self, "use_camera_obstacles", True):
+            frame = render_scenario_frame(self.scenario_type, self)
+            obstacles = camera_obstacles_from_blobs(blobs_from_frame(frame))
+        else:
+            obstacles = self.ground_truth_obstacles()
 
         stop_line_z = None
         if self.intersection:
@@ -417,13 +445,18 @@ def run_jevpilot2_episode(
     seed: int,
     raw_mode: bool = False,
     vision_mode: str = "off",
+    on_step: Optional[Any] = None,
+    use_camera_obstacles: bool = True,
 ) -> Dict[str, Any]:
     env = JevPilot2Simulator(scenario, seed=seed, raw_mode=raw_mode)
+    env.use_camera_obstacles = use_camera_obstacles
     latencies = []
     step_count = 0
     decision_interval = 2
 
     chosen_vec = [env.speed_mps, 0.0]
+    chosen_id = "v1"
+    last_obs: Optional[Dict[str, Any]] = None
     is_ood = False
     if vision_mode == "clip":
         from semif_phase1.vision import get_vision_encoder
@@ -471,8 +504,11 @@ def run_jevpilot2_episode(
             chosen_id = answers.get("vector", {}).get("choice", "v1")
             chosen_vec = list(obs["candidates"].get(chosen_id, [env.speed_mps, 0.0]))
             is_ood = bool(resp.get("meta", {}).get("true_ood"))
+            last_obs = obs
 
         terminated, _ = env.step(chosen_vec, is_ood)
+        if on_step is not None:
+            on_step(env, chosen_id, chosen_vec, last_obs)
         step_count += 1
         if terminated:
             break
