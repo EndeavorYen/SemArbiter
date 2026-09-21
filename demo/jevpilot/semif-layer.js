@@ -15,6 +15,15 @@
   chrome.innerHTML = `
     <div id="fsd-halo" aria-hidden="true"></div>
     <div id="fsd-boxes"></div>
+    <div id="fsd-pip">
+      <div class="fsd-pip-header">
+        <span class="fsd-pip-title">CAMERA: Front Main (60° FOV)</span>
+        <span id="fsd-pip-fps" class="fsd-pip-fps">-- FPS</span>
+      </div>
+      <div class="fsd-pip-body">
+        <canvas id="fsd-camera-canvas" width="320" height="180"></canvas>
+      </div>
+    </div>
     <div id="fsd-status" aria-live="polite">
       <label id="fsd-seed-box">seed
         <input id="fsd-seed-input" type="number" min="0" max="999999" step="1" />
@@ -64,7 +73,7 @@
 
   function reloadWithSeed(seed) {
     const q = new URLSearchParams(location.search);
-    q.set("seed", String(Math.max(0, Math.floor(Number(seed) || 0) % 1000000));
+    q.set("seed", String(Math.max(0, Math.floor(Number(seed) || 0) % 1000000)));
     const world = document.getElementById("world-select");
     if (world && world.value) q.set("world", world.value);
     location.search = q.toString();
@@ -78,6 +87,35 @@
   });
   seedInput.addEventListener("keydown", (ev) => {
     if (ev.key === "Enter") reloadWithSeed(seedInput.value);
+  });
+
+  const pipRoot = document.getElementById("fsd-pip");
+  const pipHeader = document.querySelector(".fsd-pip-header");
+  const pipFps = document.getElementById("fsd-pip-fps");
+  const pipCanvas = document.getElementById("fsd-camera-canvas");
+  const PIP_W = 320;
+  const PIP_H = 180;
+  const PIP_GROUND_Y = 0.05;
+  const PIP_RIBBON = "rgba(34, 211, 238, 0.45)";
+  const PIP_PED = "#22c55e";
+  const PIP_CUT = "#f5c518";
+  const PIP_LIGHT_RED = "#ef4444";
+  const PIP_HORIZON_S = 3;
+  if (pipCanvas) {
+    pipCanvas.width = PIP_W;
+    pipCanvas.height = PIP_H;
+  }
+  if (pipHeader && pipRoot) {
+    pipHeader.addEventListener("click", () => {
+      pipRoot.classList.toggle("fsd-pip-collapsed");
+    });
+  }
+  document.addEventListener("keydown", (ev) => {
+    if (!pipRoot) return;
+    if (ev.key !== "v" && ev.key !== "V") return;
+    const tag = ev.target && ev.target.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+    pipRoot.classList.toggle("fsd-pip-hidden");
   });
 
   const STALL_SPEED = 0.2;
@@ -535,6 +573,267 @@
     }
   }
 
+  function invertMat4(m) {
+    const a00 = m[0], a01 = m[1], a02 = m[2], a03 = m[3];
+    const a10 = m[4], a11 = m[5], a12 = m[6], a13 = m[7];
+    const a20 = m[8], a21 = m[9], a22 = m[10], a23 = m[11];
+    const a30 = m[12], a31 = m[13], a32 = m[14], a33 = m[15];
+    const b00 = a00 * a11 - a01 * a10;
+    const b01 = a00 * a12 - a02 * a10;
+    const b02 = a00 * a13 - a03 * a10;
+    const b03 = a01 * a12 - a02 * a11;
+    const b04 = a01 * a13 - a03 * a11;
+    const b05 = a02 * a13 - a03 * a12;
+    const b06 = a20 * a31 - a21 * a30;
+    const b07 = a20 * a32 - a22 * a30;
+    const b08 = a20 * a33 - a23 * a30;
+    const b09 = a21 * a32 - a22 * a31;
+    const b10 = a21 * a33 - a23 * a31;
+    const b11 = a22 * a33 - a23 * a32;
+    let det = b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
+    if (!det) return null;
+    det = 1 / det;
+    return [
+      (a11 * b11 - a12 * b10 + a13 * b09) * det,
+      (a02 * b10 - a01 * b11 - a03 * b09) * det,
+      (a31 * b05 - a32 * b04 + a33 * b03) * det,
+      (a22 * b04 - a21 * b05 - a23 * b03) * det,
+      (a12 * b08 - a10 * b11 - a13 * b07) * det,
+      (a00 * b11 - a02 * b08 + a03 * b07) * det,
+      (a32 * b02 - a30 * b05 - a33 * b01) * det,
+      (a20 * b05 - a22 * b02 + a23 * b01) * det,
+      (a10 * b10 - a11 * b08 + a13 * b06) * det,
+      (a01 * b08 - a00 * b10 - a03 * b06) * det,
+      (a30 * b04 - a31 * b02 + a33 * b00) * det,
+      (a21 * b02 - a20 * b04 - a23 * b00) * det,
+      (a11 * b07 - a10 * b09 - a12 * b06) * det,
+      (a00 * b09 - a01 * b07 + a02 * b06) * det,
+      (a31 * b01 - a30 * b03 - a32 * b00) * det,
+      (a20 * b03 - a21 * b01 + a22 * b00) * det,
+    ];
+  }
+
+  function mulMat4(a, b) {
+    const o = new Array(16);
+    for (let c = 0; c < 4; c++) {
+      for (let r = 0; r < 4; r++) {
+        o[c * 4 + r] =
+          a[r] * b[c * 4] +
+          a[4 + r] * b[c * 4 + 1] +
+          a[8 + r] * b[c * 4 + 2] +
+          a[12 + r] * b[c * 4 + 3];
+      }
+    }
+    return o;
+  }
+
+  function applyMat(m, x, y, z, w) {
+    return {
+      x: m[0] * x + m[4] * y + m[8] * z + m[12] * w,
+      y: m[1] * x + m[5] * y + m[9] * z + m[13] * w,
+      z: m[2] * x + m[6] * y + m[10] * z + m[14] * w,
+      w: m[3] * x + m[7] * y + m[11] * z + m[15] * w,
+    };
+  }
+
+  function unprojectGround(camera, px, py, width, height) {
+    if (!camera || !camera.matrixWorldInverse || !camera.projectionMatrix) return null;
+    const inv = invertMat4(mulMat4(camera.projectionMatrix.elements, camera.matrixWorldInverse.elements));
+    if (!inv) return null;
+    const nx = (px / width) * 2 - 1;
+    const ny = 1 - (py / height) * 2;
+    function at(ndcZ) {
+      const p = applyMat(inv, nx, ny, ndcZ, 1);
+      if (!p.w) return null;
+      return { x: p.x / p.w, y: p.y / p.w, z: p.z / p.w };
+    }
+    const a = at(-1);
+    const b = at(1);
+    if (!a || !b) return null;
+    const dy = b.y - a.y;
+    if (Math.abs(dy) < 1e-8) return null;
+    const t = (PIP_GROUND_Y - a.y) / dy;
+    return {
+      x: a.x + (b.x - a.x) * t,
+      y: PIP_GROUND_Y,
+      z: a.z + (b.z - a.z) * t,
+    };
+  }
+
+  function fitContain(srcW, srcH, dstW, dstH) {
+    const sw = Math.max(1, srcW);
+    const sh = Math.max(1, srcH);
+    const scale = Math.min(dstW / sw, dstH / sh);
+    const w = sw * scale;
+    const h = sh * scale;
+    return { x: (dstW - w) / 2, y: (dstH - h) / 2, w: w, h: h, scale: scale };
+  }
+
+  function mapPip(px, py, srcW, srcH, fit) {
+    return {
+      x: fit.x + (px / srcW) * fit.w,
+      y: fit.y + (py / srcH) * fit.h,
+    };
+  }
+
+  function egoRel(player, x, z) {
+    const h = Number(player && player.heading) || 0;
+    const dx = x - (Number(player && player.x) || 0);
+    const dz = z - (Number(player && player.z) || 0);
+    return {
+      rel_x: dx * Math.cos(h) + dz * Math.sin(h),
+      rel_z: dx * Math.sin(h) - dz * Math.cos(h),
+    };
+  }
+
+  function ribbonPoints(player, maneuver) {
+    const speed = Math.max(0, Number(
+      maneuver && maneuver.velocity_mps != null
+        ? maneuver.velocity_mps
+        : maneuver && maneuver.end_speed_mps != null
+          ? maneuver.end_speed_mps
+          : player.speed
+    ) || 0);
+    const dist = Math.max(0.5, speed * PIP_HORIZON_S);
+    const offset = maneuver && Number.isFinite(Number(maneuver.lane_offset_m))
+      ? Number(maneuver.lane_offset_m)
+      : 0;
+    const look = Math.max(1, Number(maneuver && maneuver.lookahead_m) || 6);
+    const pts = [];
+    for (let i = 0; i <= 8; i++) {
+      const s = (dist * i) / 8;
+      pts.push(aheadOf(player, s, offset * Math.min(1, s / look)));
+    }
+    return pts;
+  }
+
+  const pipFrameMs = [];
+  function pipFpsText(now) {
+    pipFrameMs.push(now);
+    const cutoff = now - 1000;
+    while (pipFrameMs.length && pipFrameMs[0] < cutoff) pipFrameMs.shift();
+    if (pipFrameMs.length < 2) return "-- FPS";
+    const span = pipFrameMs[pipFrameMs.length - 1] - pipFrameMs[0];
+    if (span <= 0) return "-- FPS";
+    return Math.round(((pipFrameMs.length - 1) * 1000) / span) + " FPS";
+  }
+
+  function pipScene(sim, now) {
+    if (!sim || typeof sim.decisionState !== "function") return null;
+    if (sim._pipScene && now - sim._pipSceneAt < 100) return sim._pipScene;
+    try {
+      sim._pipScene = sim.decisionState();
+    } catch (_err) {
+      sim._pipScene = null;
+    }
+    sim._pipSceneAt = now;
+    return sim._pipScene;
+  }
+
+  function paintPip(sim, world, now) {
+    if (!pipCanvas || !pipRoot || pipRoot.classList.contains("fsd-pip-hidden")) return;
+    const ctx = pipCanvas.getContext("2d");
+    if (!ctx) return;
+    if (pipFps) pipFps.textContent = pipFpsText(now);
+    const src = world && world.canvas;
+    const srcW = src ? (src.width || src.clientWidth || PIP_W) : PIP_W;
+    const srcH = src ? (src.height || src.clientHeight || PIP_H) : PIP_H;
+    const fit = fitContain(srcW, srcH, PIP_W, PIP_H);
+    ctx.clearRect(0, 0, PIP_W, PIP_H);
+    if (src) ctx.drawImage(src, fit.x, fit.y, fit.w, fit.h);
+    const camera = world && world.camera;
+    const player = sim && sim.player;
+    if (!camera || !player) return;
+    const maneuver = player.maneuver;
+    const center = ribbonPoints(player, maneuver);
+    const left = [];
+    const right = [];
+    for (const pt of center) {
+      const pose = { x: pt.x, z: pt.z, heading: player.heading || 0 };
+      const l = aheadOf(pose, 0, -0.9);
+      const r = aheadOf(pose, 0, 0.9);
+      const pl = project(camera, l.x, PIP_GROUND_Y, l.z, srcW, srcH);
+      const pr = project(camera, r.x, PIP_GROUND_Y, r.z, srcW, srcH);
+      if (pl) left.push(mapPip(pl.x, pl.y, srcW, srcH, fit));
+      if (pr) right.push(mapPip(pr.x, pr.y, srcW, srcH, fit));
+    }
+    if (left.length >= 2 && right.length >= 2) {
+      ctx.beginPath();
+      ctx.fillStyle = PIP_RIBBON;
+      ctx.moveTo(left[0].x, left[0].y);
+      for (let i = 1; i < left.length; i++) ctx.lineTo(left[i].x, left[i].y);
+      for (let i = right.length - 1; i >= 0; i--) ctx.lineTo(right[i].x, right[i].y);
+      ctx.closePath();
+      ctx.fill();
+    }
+    const marks = []
+      .concat(sim.pedestrians || [])
+      .concat(sim._fsdAgents || [])
+      .concat((sim.traffic || []).filter((obj) => obj && (obj.hazardLights || obj._fsd === "cutin")));
+    for (const obj of marks) {
+      const d = dist2(obj, player);
+      if (d > 55) continue;
+      const top = project(camera, obj.x, obj.height || 1.6, obj.z, srcW, srcH);
+      const bot = project(camera, obj.x, PIP_GROUND_Y, obj.z, srcW, srcH);
+      if (!top || !bot) continue;
+      const topM = mapPip(top.x, top.y, srcW, srcH, fit);
+      const botM = mapPip(bot.x, bot.y, srcW, srcH, fit);
+      const boxH = Math.max(8, Math.abs(botM.y - topM.y));
+      const boxW = Math.max(6, boxH * 0.45);
+      const leftX = topM.x - boxW / 2;
+      const topY = Math.min(topM.y, botM.y);
+      const ped = obj.type === "pedestrian" || obj._fsd === "pedestrian";
+      const cut = obj._fsd === "cutin";
+      const tau = Number.isFinite(Number(obj._cut)) ? Number(obj._cut) : d / Math.max(0.5, Number(obj.speed) || 1);
+      let stroke = ped ? PIP_PED : PIP_CUT;
+      if (cut && tau < 1.5) stroke = PIP_LIGHT_RED;
+      ctx.strokeStyle = stroke;
+      ctx.strokeRect(leftX, topY, boxW, boxH);
+      const contactX = leftX + boxW / 2;
+      const contactY = Math.max(topM.y, botM.y);
+      ctx.beginPath();
+      ctx.moveTo(contactX - 4, contactY);
+      ctx.lineTo(contactX + 4, contactY);
+      ctx.moveTo(contactX, contactY - 4);
+      ctx.lineTo(contactX, contactY + 4);
+      ctx.stroke();
+      const srcContactX = ((contactX - fit.x) / fit.w) * srcW;
+      const srcContactY = ((contactY - fit.y) / fit.h) * srcH;
+      const ground = unprojectGround(camera, srcContactX, srcContactY, srcW, srcH);
+      const rel = ground ? egoRel(player, ground.x, ground.z) : egoRel(player, obj.x, obj.z);
+      const where = "(" + rel.rel_x.toFixed(1) + ", " + rel.rel_z.toFixed(1) + ")";
+      ctx.fillStyle = stroke;
+      if (ped) ctx.fillText("PED " + d.toFixed(1) + "m", leftX, topY - 4);
+      else if (cut) ctx.fillText("CUT-IN " + d.toFixed(1) + "m · tau " + tau.toFixed(1) + "s", leftX, topY - 4);
+      else ctx.fillText("VEH " + d.toFixed(1) + "m", leftX, topY - 4);
+      ctx.fillText(where, contactX + 6, contactY);
+    }
+    const scene = pipScene(sim, now);
+    const inter = scene && scene.scene && scene.scene.intersection;
+    const line = inter && inter.stop_line_position;
+    if (line && inter.visible !== false && inter.signal) {
+      const sig = String(inter.signal).toLowerCase();
+      const color = sig === "red" ? PIP_LIGHT_RED : (sig === "amber" || sig === "yellow") ? "#f5c518" : "#22c55e";
+      const lamp = project(camera, Number(line.x) || 0, 4.2, Number(line.z) || 0, srcW, srcH);
+      if (lamp) {
+        const m = mapPip(lamp.x, lamp.y, srcW, srcH, fit);
+        ctx.beginPath();
+        ctx.strokeStyle = color;
+        ctx.fillStyle = color;
+        ctx.arc(m.x, m.y, 6, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+  }
+
+  window.SEMIF_PIP = {
+    project: project,
+    unprojectGround: unprojectGround,
+    fitContain: fitContain,
+    egoRel: egoRel,
+    paintPip: paintPip,
+  };
+
   function tick() {
     const sim = window.SEMIF_SIM;
     const world = window.SEMIF_WORLD;
@@ -573,6 +872,11 @@
       const seed = sim.world && sim.world.seed;
       if (seed != null && document.activeElement !== seedInput) seedInput.value = String(seed);
       drawBoxes(sim, world);
+      try {
+        paintPip(sim, world, performance.now());
+      } catch (_err) {
+        /* PIP must not kill the drive loop */
+      }
     }
     requestAnimationFrame(tick);
   }
