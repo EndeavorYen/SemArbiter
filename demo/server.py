@@ -806,6 +806,7 @@ class DecisionEngine:
 
     def classify_jev(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Jev classifier. Flat and SemIf share the same action ids. SemIf adds a maneuver class."""
+        t0 = time.perf_counter()
         state = payload.get("state", {})
         questions = payload.get("questions", {})
         mode = payload.get("mode", "flat")
@@ -1013,6 +1014,7 @@ class DecisionEngine:
                 answers["vector"]["choice"] = safe
                 visual_meta["fail_safe"] = True
 
+        classifier_ms = (time.perf_counter() - t0) * 1000.0
         return {
             "model": self.model_name,
             "answers": answers,
@@ -1020,6 +1022,7 @@ class DecisionEngine:
                 "input_tokens": total_input_tokens,
                 "output_tokens": 0,
             },
+            "classifier_ms": classifier_ms,
             "meta": {
                 "maneuver": maneuver,
                 "tree_path": tree_path,
@@ -1039,6 +1042,7 @@ class DecisionEngine:
                 "vision_free_energy": visual_meta.get("vision_free_energy"),
                 "jev1_intent": directive.get("intent"),
                 "fail_safe": bool(visual_meta.get("fail_safe")),
+                "classifier_ms": classifier_ms,
             },
         }
 
@@ -1114,8 +1118,10 @@ async def vision_endpoint(payload: Dict[str, Any]):
         return {"error": "image (data URL or base64) required"}
     from semif_phase1.vision import get_vision_encoder
 
+    t0 = time.perf_counter()
     evidence = get_vision_encoder().infer_b64(image)
-    return {"vision": evidence}
+    vision_encode_ms = (time.perf_counter() - t0) * 1000.0
+    return {"vision": evidence, "vision_encode_ms": vision_encode_ms}
 
 
 @app.post("/decide")
