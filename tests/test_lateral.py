@@ -125,6 +125,25 @@ def test_pd_holds_straight_200m_within_15cm():
         assert peak <= 0.15, f"seed {seed} peak {peak:.3f} m"
 
 
+def test_live_closed_loop_cruise_stays_within_15cm():
+    """#113 envelope on run_jevpilot2_episode, the step that calls lateral_pd."""
+    from demo.server import DecisionEngine
+    from benchmarks.diagnose_control_quality import collect_episode
+
+    engine = DecisionEngine(use_mock=True)
+    for seed in (42, 100):
+        _episode, trace = collect_episode(
+            engine,
+            mode="heuristic",
+            scenario="speed_zone_city",
+            seed=seed,
+            use_camera_obstacles=False,
+        )
+        assert trace, seed
+        peak = max(abs(float(sample["x"])) for sample in trace)
+        assert peak <= 0.15, f"seed {seed} peak {peak:.3f} m"
+
+
 def test_web_offset_pursuit_without_center_ref_exceeds_15cm():
     peak = _web_pursuit_peak(use_center_ref=False, seed=42)
     assert peak > 0.15
