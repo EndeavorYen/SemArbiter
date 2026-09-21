@@ -481,9 +481,9 @@ def test_ribbon_follows_the_route_instead_of_a_straight_heading():
     for i in range(11):
         s = i * 2.0
         if s <= 10:
-            route.append({"x": 0.0, "z": -s, "s": s, "heading": 0.0})
+            route.append({"x": 0.0, "z": -s, "s": s})
         else:
-            route.append({"x": s - 10.0, "z": -10.0, "s": s, "heading": math.pi / 2})
+            route.append({"x": s - 10.0, "z": -10.0, "s": s})
     pts = _run({
         "cmd": "ribbon",
         "player": {

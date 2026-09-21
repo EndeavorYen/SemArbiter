@@ -698,25 +698,27 @@
   }
 
   function pointOnRoute(points, s) {
-    const last = points[points.length - 1];
-    if (s <= points[0].s) return points[0];
-    if (s >= last.s) return last;
-    for (let i = 0; i < points.length - 1; i++) {
-      const a = points[i];
-      const b = points[i + 1];
-      if (s > b.s || s < a.s) continue;
-      const span = (b.s - a.s) || 1;
-      const t = (s - a.s) / span;
-      const heading = Number.isFinite(a.heading)
-        ? a.heading
-        : Math.atan2(b.x - a.x, -(b.z - a.z));
-      return {
-        x: a.x + (b.x - a.x) * t,
-        z: a.z + (b.z - a.z) * t,
-        heading: heading,
-      };
+    let i = 0;
+    if (s > points[0].s) {
+      i = points.length - 2;
+      for (let k = 0; k < points.length - 1; k++) {
+        if (s <= points[k + 1].s) {
+          i = k;
+          break;
+        }
+      }
     }
-    return last;
+    const a = points[i];
+    const b = points[i + 1];
+    const span = (b.s - a.s) || 1;
+    let t = (s - a.s) / span;
+    if (t < 0) t = 0;
+    else if (t > 1) t = 1;
+    return {
+      x: a.x + (b.x - a.x) * t,
+      z: a.z + (b.z - a.z) * t,
+      heading: Math.atan2(b.x - a.x, -(b.z - a.z)),
+    };
   }
 
   function ribbonPoints(player, maneuver) {
@@ -735,7 +737,7 @@
       if (route && route.length >= 2 && Number.isFinite(originS)) {
         const pose = pointOnRoute(route, originS + along);
         const moved = aheadOf(pose, 0, lat);
-        moved.heading = Number(pose.heading) || 0;
+        moved.heading = Number.isFinite(Number(pose.heading)) ? Number(pose.heading) : 0;
         pts.push(moved);
       } else {
         const moved = aheadOf(player, along, lat);
