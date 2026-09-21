@@ -522,6 +522,11 @@
     if (!world._onboardTarget) {
       world._onboardTarget = new sample.constructor(PIP_W, PIP_H);
     }
+    const target = world._onboardTarget;
+    target.isXRRenderTarget = true;
+    if (target.texture) {
+      target.texture.colorSpace = renderer.outputColorSpace || "srgb";
+    }
     const hidden = [];
     if (world.player && world.player.traverse) {
       world.player.traverse((obj) => {
@@ -533,11 +538,11 @@
     }
     const prev = renderer.getRenderTarget ? renderer.getRenderTarget() : null;
     try {
-      renderer.setRenderTarget(world._onboardTarget);
+      renderer.setRenderTarget(target);
       renderer.render(scene, cam);
       const pixels = new Uint8Array(PIP_W * PIP_H * 4);
       if (renderer.readRenderTargetPixels) {
-        renderer.readRenderTargetPixels(world._onboardTarget, 0, 0, PIP_W, PIP_H, pixels);
+        renderer.readRenderTargetPixels(target, 0, 0, PIP_W, PIP_H, pixels);
       }
       paintOnboardPixels(pixels);
     } finally {

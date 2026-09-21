@@ -334,7 +334,12 @@ if (spec.cmd === "dom") {
     cam.clone = () => makeCam();
     return cam;
   }
-  function RT(w, h) { this.w = w; this.h = h; this.isWebGLRenderTarget = true; }
+  function RT(w, h) {
+    this.w = w;
+    this.h = h;
+    this.isWebGLRenderTarget = true;
+    this.texture = { colorSpace: "srgb-linear" };
+  }
   const world = {
     mode: "map",
     canvas: worldCanvas,
@@ -345,7 +350,16 @@ if (spec.cmd === "dom") {
     sun: { shadow: { map: { constructor: RT } } },
     renderer: {
       getRenderTarget() { return null; },
-      setRenderTarget(target) { shots.push({ op: "target", w: target && target.w, h: target && target.h }); },
+      outputColorSpace: "srgb",
+      setRenderTarget(target) {
+        shots.push({
+          op: "target",
+          w: target && target.w,
+          h: target && target.h,
+          xr: target ? target.isXRRenderTarget === true : false,
+          colorSpace: target && target.texture && target.texture.colorSpace,
+        });
+      },
       render(_scene, cam) {
         shots.push({ op: "render", x: cam.position.x, y: cam.position.y, z: cam.position.z, fov: cam.fov, look: cam.look });
       },
@@ -368,11 +382,13 @@ if (spec.cmd === "dom") {
   nowMs = 1000;
   window.__raf();
   const viewShots = shots.filter((s) => s.op === "render").length - beforeView;
+  const target = shots.filter((s) => s.op === "target" && s.w)[0];
   process.stdout.write(JSON.stringify({
     url,
     mode: world.mode,
     first,
     second,
+    target,
     viewShots,
     ops: plainOps(canvas.__ctx.ops),
     fps: fps.textContent,
@@ -458,6 +474,10 @@ def test_pip_shows_the_fixed_onboard_camera_not_the_player_view():
     again = grabbed["second"]
     assert again["x"] == pytest.approx(shot["x"])
     assert again["z"] == pytest.approx(shot["z"])
+    assert any(op["op"] == "putImageData" for op in grabbed["ops"])
+    target = grabbed["target"]
+    assert target["xr"] is True
+    assert target["colorSpace"] == "srgb"
     assert grabbed["viewShots"] == 3
     assert grabbed["fps"] == "2 FPS"
     assert any(op["op"] == "putImageData" for op in grabbed["ops"])
