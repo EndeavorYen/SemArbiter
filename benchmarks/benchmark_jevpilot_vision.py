@@ -42,7 +42,7 @@ def main() -> None:
             raise SystemExit("vision encoder required for official scores (got stub)")
         vision_backend = enc.backend
     arms = {}
-    loop_latencies = []
+    loop_latencies: dict = {}
     vision_arm = "synthetic" if args.mock else "clip"
     for vision_mode in ("off", vision_arm):
         eps = {}
@@ -58,8 +58,10 @@ def main() -> None:
             )
             eps[mode] = summary["episodes"]
             compact[mode] = {k: v for k, v in summary.items() if k != "episodes"}
+            samples = []
             for ep in summary["episodes"]:
-                loop_latencies.extend(ep["latencies"])
+                samples.extend(ep["latencies"])
+            loop_latencies[(mode, vision_mode)] = samples
         arms[vision_mode] = {
             "modes": compact,
             "driving_quality": compare_driving(eps),
@@ -78,9 +80,14 @@ def main() -> None:
     }
     if args.web_telemetry:
         web = json.loads(Path(args.web_telemetry).read_text(encoding="utf-8"))
+        local_samples = loop_latencies.get(("flat", vision_arm), [])
         report["web_alignment"] = align_web_export(
             web,
-            {"classifier_ms": summarize_latency(loop_latencies)},
+            {
+                "classifier_ms": summarize_latency(local_samples),
+                "mode": "flat",
+                "vision_mode": vision_arm,
+            },
         )
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
     Path(args.output).write_text(json.dumps(report, indent=2), encoding="utf-8")

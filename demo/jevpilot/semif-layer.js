@@ -320,14 +320,16 @@
         } catch (_err) {
           /* keep server JSON */
         }
-        if (telemetry && data) {
+        if (telemetry && data && res.ok) {
           const rtt = performance.now() - tClass;
           const cls = Number(data.classifier_ms != null ? data.classifier_ms : (data.meta && data.meta.classifier_ms));
-          telemetry.recordClassifier({
-            classifier_ms: Number.isFinite(cls) ? cls : rtt,
-            rtt_ms: rtt,
-          });
-          refreshLatencyHud();
+          if (Number.isFinite(cls)) {
+            telemetry.recordClassifier({
+              classifier_ms: cls,
+              rtt_ms: rtt,
+            });
+            refreshLatencyHud();
+          }
         }
         if (data && data.meta) renderDecision(data);
         return new Response(JSON.stringify(data), {
@@ -611,18 +613,24 @@
       });
       const data = await res.json();
       const rttMs = performance.now() - tVis;
+      if (!res.ok || data.error) {
+        visionEl.textContent = "VISION error";
+        return;
+      }
       const vis = data.vision || data;
       window.SEMIF_VISION = vis;
       if (telemetry) {
         const encode = Number(
           data.vision_encode_ms != null ? data.vision_encode_ms : vis.latency_ms
         );
-        telemetry.recordVision({
-          encode_ms: Number.isFinite(encode) ? encode : rttMs,
-          rtt_ms: rttMs,
-          grab_ms: grabMs,
-        });
-        refreshLatencyHud();
+        if (Number.isFinite(encode)) {
+          telemetry.recordVision({
+            encode_ms: encode,
+            rtt_ms: rttMs,
+            grab_ms: grabMs,
+          });
+          refreshLatencyHud();
+        }
       }
       const sig = vis.signal || "unknown";
       visionEl.textContent = vis.event

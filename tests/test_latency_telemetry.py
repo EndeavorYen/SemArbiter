@@ -49,12 +49,12 @@ def test_summarize_latency_p50_p95_p99_stddev_and_extrema():
 
 
 def test_ring_buffer_keeps_last_120():
-    from semif_phase1.latency_telemetry import LatencyWindow
+    from semif_phase1.latency_telemetry import LatencyTelemetry
 
-    win = LatencyWindow(LATENCY_WINDOW)
+    tel = LatencyTelemetry(now_ms=lambda: 0.0)
     for i in range(130):
-        win.push(float(i))
-    hist = win.samples()
+        tel.record_classifier(classifier_ms=float(i), rtt_ms=float(i))
+    hist = [row["ms"] for row in tel.get_history()["classifier_ms"]]
     assert len(hist) == 120
     assert hist[0] == 10.0
     assert hist[-1] == 129.0
@@ -147,9 +147,12 @@ def test_overlay_wires_live_telemetry_hooks():
     assert "e2e_loop_ms" in core
     fetch_block = js.split("window.fetch = function")[1].split("function mockChoice")[0]
     assert "recordClassifier" in fetch_block
+    assert "res.ok" in fetch_block
     vision_block = js.split("async function visionTick")[1].split("if (visionOn)")[0]
     assert "recordVision" in vision_block
     assert "grabFrame" in vision_block
+    assert "res.ok" in vision_block
+    assert "data.error" in vision_block
 
 
 def test_vision_benchmark_reads_web_telemetry_json():
@@ -157,3 +160,4 @@ def test_vision_benchmark_reads_web_telemetry_json():
     assert "--web-telemetry" in src
     assert "align_web_export" in src
     assert 'ep["latencies"]' in src or "ep['latencies']" in src
+    assert 'loop_latencies.get(("flat"' in src or "loop_latencies[(\"flat\"" in src

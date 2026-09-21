@@ -60,21 +60,6 @@ def summarize_latency(samples: List[float]) -> Dict[str, Any]:
     }
 
 
-class LatencyWindow:
-    def __init__(self, size: int = LATENCY_WINDOW) -> None:
-        self.size = int(size)
-        self._samples: List[float] = []
-
-    def push(self, ms: float) -> None:
-        self._samples.append(float(ms))
-        overflow = len(self._samples) - self.size
-        if overflow > 0:
-            del self._samples[:overflow]
-
-    def samples(self) -> List[float]:
-        return list(self._samples)
-
-
 class LatencyTelemetry:
     def __init__(
         self,
