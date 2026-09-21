@@ -734,9 +734,13 @@
       const lat = offset * Math.min(1, along / look);
       if (route && route.length >= 2 && Number.isFinite(originS)) {
         const pose = pointOnRoute(route, originS + along);
-        pts.push(aheadOf(pose, 0, lat));
+        const moved = aheadOf(pose, 0, lat);
+        moved.heading = Number(pose.heading) || 0;
+        pts.push(moved);
       } else {
-        pts.push(aheadOf(player, along, lat));
+        const moved = aheadOf(player, along, lat);
+        moved.heading = Number(player.heading) || 0;
+        pts.push(moved);
       }
     }
     return pts;
@@ -777,7 +781,11 @@
     const left = [];
     const right = [];
     for (const pt of center) {
-      const pose = { x: pt.x, z: pt.z, heading: player.heading || 0 };
+      const pose = {
+        x: pt.x,
+        z: pt.z,
+        heading: Number.isFinite(pt.heading) ? pt.heading : (player.heading || 0),
+      };
       const l = aheadOf(pose, 0, -0.9);
       const r = aheadOf(pose, 0, 0.9);
       const pl = project(camera, l.x, PIP_GROUND_Y, l.z, srcW, srcH);

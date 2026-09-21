@@ -499,6 +499,7 @@ def test_ribbon_follows_the_route_instead_of_a_straight_heading():
     far = pts[-1]
     assert far["x"] > 8
     assert abs(far["z"] + 10) < 1.5
+    assert abs(far["heading"] - (math.pi / 2)) < 0.2
 
 
 def test_v_and_header_toggle_without_stealing_seed_input():
