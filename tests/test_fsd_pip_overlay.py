@@ -358,6 +358,7 @@ if (spec.cmd === "dom") {
           h: target && target.h,
           xr: target ? target.isXRRenderTarget === true : false,
           colorSpace: target && target.texture && target.texture.colorSpace,
+          internalFormat: target && target.texture ? target.texture.internalFormat || null : null,
         });
       },
       render(_scene, cam) {
@@ -478,6 +479,7 @@ def test_pip_shows_the_fixed_onboard_camera_not_the_player_view():
     target = grabbed["target"]
     assert target["xr"] is True
     assert target["colorSpace"] == "srgb"
+    assert target["internalFormat"] == "RGBA8"
     assert grabbed["viewShots"] == 3
     assert grabbed["fps"] == "2 FPS"
     assert any(op["op"] == "putImageData" for op in grabbed["ops"])

@@ -526,6 +526,7 @@
     target.isXRRenderTarget = true;
     if (target.texture) {
       target.texture.colorSpace = renderer.outputColorSpace || "srgb";
+      target.texture.internalFormat = "RGBA8";
     }
     const hidden = [];
     if (world.player && world.player.traverse) {
