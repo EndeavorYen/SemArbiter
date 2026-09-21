@@ -112,6 +112,7 @@
   }
   document.addEventListener("keydown", (ev) => {
     if (!pipRoot) return;
+    if (ev.repeat) return;
     if (ev.key !== "v" && ev.key !== "V") return;
     const tag = ev.target && ev.target.tagName;
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
@@ -686,23 +687,57 @@
     };
   }
 
+  function ribbonSpeed(player, maneuver) {
+    if (maneuver && Number.isFinite(Number(maneuver.velocity_mps))) {
+      return Math.max(0, Number(maneuver.velocity_mps));
+    }
+    if (maneuver && Number.isFinite(Number(maneuver.end_speed_mps))) {
+      return Math.max(0, Number(maneuver.end_speed_mps));
+    }
+    return Math.max(0, Number(player && player.speed) || 0);
+  }
+
+  function pointOnRoute(points, s) {
+    const last = points[points.length - 1];
+    if (s <= points[0].s) return points[0];
+    if (s >= last.s) return last;
+    for (let i = 0; i < points.length - 1; i++) {
+      const a = points[i];
+      const b = points[i + 1];
+      if (s > b.s || s < a.s) continue;
+      const span = (b.s - a.s) || 1;
+      const t = (s - a.s) / span;
+      const heading = Number.isFinite(a.heading)
+        ? a.heading
+        : Math.atan2(b.x - a.x, -(b.z - a.z));
+      return {
+        x: a.x + (b.x - a.x) * t,
+        z: a.z + (b.z - a.z) * t,
+        heading: heading,
+      };
+    }
+    return last;
+  }
+
   function ribbonPoints(player, maneuver) {
-    const speed = Math.max(0, Number(
-      maneuver && maneuver.velocity_mps != null
-        ? maneuver.velocity_mps
-        : maneuver && maneuver.end_speed_mps != null
-          ? maneuver.end_speed_mps
-          : player.speed
-    ) || 0);
+    const speed = ribbonSpeed(player, maneuver);
     const dist = Math.max(0.5, speed * PIP_HORIZON_S);
     const offset = maneuver && Number.isFinite(Number(maneuver.lane_offset_m))
       ? Number(maneuver.lane_offset_m)
       : 0;
     const look = Math.max(1, Number(maneuver && maneuver.lookahead_m) || 6);
+    const route = player && player.route && player.route.points;
+    const originS = Number(player && player.s);
     const pts = [];
     for (let i = 0; i <= 8; i++) {
-      const s = (dist * i) / 8;
-      pts.push(aheadOf(player, s, offset * Math.min(1, s / look)));
+      const along = (dist * i) / 8;
+      const lat = offset * Math.min(1, along / look);
+      if (route && route.length >= 2 && Number.isFinite(originS)) {
+        const pose = pointOnRoute(route, originS + along);
+        pts.push(aheadOf(pose, 0, lat));
+      } else {
+        pts.push(aheadOf(player, along, lat));
+      }
     }
     return pts;
   }
@@ -718,16 +753,9 @@
     return Math.round(((pipFrameMs.length - 1) * 1000) / span) + " FPS";
   }
 
-  function pipScene(sim, now) {
-    if (!sim || typeof sim.decisionState !== "function") return null;
-    if (sim._pipScene && now - sim._pipSceneAt < 100) return sim._pipScene;
-    try {
-      sim._pipScene = sim.decisionState();
-    } catch (_err) {
-      sim._pipScene = null;
-    }
-    sim._pipSceneAt = now;
-    return sim._pipScene;
+  function pipScene(sim) {
+    if (!sim) return null;
+    return sim.lastDecisionState || null;
   }
 
   function paintPip(sim, world, now) {
@@ -754,8 +782,9 @@
       const r = aheadOf(pose, 0, 0.9);
       const pl = project(camera, l.x, PIP_GROUND_Y, l.z, srcW, srcH);
       const pr = project(camera, r.x, PIP_GROUND_Y, r.z, srcW, srcH);
-      if (pl) left.push(mapPip(pl.x, pl.y, srcW, srcH, fit));
-      if (pr) right.push(mapPip(pr.x, pr.y, srcW, srcH, fit));
+      if (!pl || !pr) continue;
+      left.push(mapPip(pl.x, pl.y, srcW, srcH, fit));
+      right.push(mapPip(pr.x, pr.y, srcW, srcH, fit));
     }
     if (left.length >= 2 && right.length >= 2) {
       ctx.beginPath();
@@ -808,12 +837,14 @@
       else ctx.fillText("VEH " + d.toFixed(1) + "m", leftX, topY - 4);
       ctx.fillText(where, contactX + 6, contactY);
     }
-    const scene = pipScene(sim, now);
+    const scene = pipScene(sim);
     const inter = scene && scene.scene && scene.scene.intersection;
     const line = inter && inter.stop_line_position;
     if (line && inter.visible !== false && inter.signal) {
       const sig = String(inter.signal).toLowerCase();
-      const color = sig === "red" ? PIP_LIGHT_RED : (sig === "amber" || sig === "yellow") ? "#f5c518" : "#22c55e";
+      let color = "#22c55e";
+      if (sig === "red") color = PIP_LIGHT_RED;
+      else if (sig === "amber" || sig === "yellow") color = "#f5c518";
       const lamp = project(camera, Number(line.x) || 0, 4.2, Number(line.z) || 0, srcW, srcH);
       if (lamp) {
         const m = mapPip(lamp.x, lamp.y, srcW, srcH, fit);
@@ -831,6 +862,7 @@
     unprojectGround: unprojectGround,
     fitContain: fitContain,
     egoRel: egoRel,
+    ribbonPoints: ribbonPoints,
     paintPip: paintPip,
   };
 

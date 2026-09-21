@@ -296,7 +296,10 @@ if (spec.cmd === "dom") {
     traffic: [],
     _fsdAgents: spec.agents || [],
     step() {},
-    decisionState() { return spec.decision || {}; },
+    lastDecisionState: spec.decision || null,
+    decisionState() {
+      throw new Error("pip must not call decisionState");
+    },
   };
   sim.player.maneuver = spec.maneuver;
   nowMs = 0;
@@ -315,11 +318,16 @@ if (spec.cmd === "dom") {
     fit: api.fitContain(srcW, srcH, canvas.width, canvas.height),
     sameRaf: window.__raf.length >= 0,
   }));
+} else if (spec.cmd === "ribbon") {
+  const pts = api.ribbonPoints(spec.player, spec.maneuver);
+  process.stdout.write(JSON.stringify(pts));
 } else if (spec.cmd === "keys") {
   const beforeHidden = pip.classList.contains("fsd-pip-hidden");
   const beforeFold = pip.classList.contains("fsd-pip-collapsed");
   document.dispatchEvent({ type: "keydown", key: "v", target: document.body, bubbles: true });
   const afterVHidden = pip.classList.contains("fsd-pip-hidden");
+  document.dispatchEvent({ type: "keydown", key: "v", target: document.body, repeat: true, bubbles: true });
+  const afterRepeat = pip.classList.contains("fsd-pip-hidden");
   header.dispatchEvent({ type: "click", target: header, bubbles: true });
   const afterClickFold = pip.classList.contains("fsd-pip-collapsed");
   const seed = document.getElementById("fsd-seed-input");
@@ -327,7 +335,7 @@ if (spec.cmd === "dom") {
   seed.dispatchEvent({ type: "keydown", key: "v", target: seed, bubbles: true });
   const hiddenAfterType = pip.classList.contains("fsd-pip-hidden");
   process.stdout.write(JSON.stringify({
-    beforeHidden, beforeFold, afterVHidden, afterClickFold, hiddenBeforeType, hiddenAfterType,
+    beforeHidden, beforeFold, afterVHidden, afterRepeat, afterClickFold, hiddenBeforeType, hiddenAfterType,
   }));
 } else {
   throw new Error("unknown cmd");
@@ -467,9 +475,36 @@ def test_ribbon_tracks_the_selected_maneuver_on_the_next_frame():
     assert abs(far_x(painted["second"]) - far_x(painted["first"])) > 5
 
 
+def test_ribbon_follows_the_route_instead_of_a_straight_heading():
+    """A 90 degree route must not keep the 3s ribbon on the initial heading."""
+    route = []
+    for i in range(11):
+        s = i * 2.0
+        if s <= 10:
+            route.append({"x": 0.0, "z": -s, "s": s, "heading": 0.0})
+        else:
+            route.append({"x": s - 10.0, "z": -10.0, "s": s, "heading": math.pi / 2})
+    pts = _run({
+        "cmd": "ribbon",
+        "player": {
+            "x": 0.0,
+            "z": 0.0,
+            "s": 0.0,
+            "heading": 0.0,
+            "speed": 10,
+            "route": {"points": route},
+        },
+        "maneuver": {"lane_offset_m": 0.0, "velocity_mps": 10.0, "lookahead_m": 8.0},
+    })
+    far = pts[-1]
+    assert far["x"] > 8
+    assert abs(far["z"] + 10) < 1.5
+
+
 def test_v_and_header_toggle_without_stealing_seed_input():
     keys = _run({"cmd": "keys"})
     assert keys["beforeHidden"] is False
     assert keys["afterVHidden"] is True
+    assert keys["afterRepeat"] is keys["afterVHidden"]
     assert keys["afterClickFold"] is not keys["beforeFold"]
     assert keys["hiddenAfterType"] is keys["hiddenBeforeType"]
