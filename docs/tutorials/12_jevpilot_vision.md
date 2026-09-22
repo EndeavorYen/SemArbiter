@@ -48,7 +48,7 @@ flowchart LR
 
 像素不直接作為未訓練 token 注入決策迴圈。`compact_jev_state` 只留 `vision.event` 與 `signal`。事件來自**相鄰兩張圖的像素框**（變大＝靠近、橫移向中心＝切入、上一幀沒有＝出現），不讀世界座標，不把示意幀尺度寫成「TTC 2.0s」。沒有框時才退回 CLIP 分數差。1024 桶可接受。
 
-官方 CUDA 視覺分數是 seed 42 的現有網頁城市兩趟：視覺開，以及 `?vision=0`。像素來自現有 Three.js 車載相機，決策走 `demo/server.py`。`results/phase5-jevpilot-vision-cuda.json` 只在兩趟都走到 `complete`、`device` 為 `cuda`、且不是 `MockDecisionEngine` 時寫出。乾淨完成是走到 `complete`，且紅燈、撞車、撞行人、crash 都是 0。超速另記，不翻轉乾淨。這份檔不是 JevPilot2 PIL 色塊完成率的延續。
+官方 CUDA 視覺分數是 seed 42 的現有網頁城市兩趟：`?lap=1` 視覺開，以及 `?vision=0&lap=1`。`lap=1` 讓車開到這條路線終點就停下，並把 `complete` 設為真。像素來自現有 Three.js 車載相機，決策走 `demo/server.py`。`results/phase5-jevpilot-vision-cuda.json` 只在兩趟都走到 `complete`、`device` 為 `cuda`、且不是 `MockDecisionEngine` 時寫出。乾淨完成是走到 `complete`，且紅燈、撞車、撞行人、crash 都是 0。超速另記，不翻轉乾淨。這份檔不是 JevPilot2 PIL 色塊完成率的延續。
 
 JevPilot2 的 `vision_mode=clip` 直接拒絕，不再呼叫 `render_scenario_frame`。`vision_mode=synthetic` 只給 pytest／`--mock`。
 

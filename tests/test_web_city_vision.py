@@ -20,8 +20,8 @@ def _obs(*, complete, red=0, vehicles=0, pedestrians=0, crash=None, speeding=0, 
 def test_lap_urls_use_existing_page_and_vision_switch():
     on = lap_url("http://127.0.0.1:8000", 42, True)
     off = lap_url("http://127.0.0.1:8000/", 42, False)
-    assert on == "http://127.0.0.1:8000/jevpilot/?seed=42"
-    assert off == "http://127.0.0.1:8000/jevpilot/?seed=42&vision=0"
+    assert on == "http://127.0.0.1:8000/jevpilot/?seed=42&lap=1"
+    assert off == "http://127.0.0.1:8000/jevpilot/?seed=42&lap=1&vision=0"
 
 
 def test_clean_is_complete_with_four_failures_at_zero():

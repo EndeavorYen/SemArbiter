@@ -214,7 +214,9 @@ document.querySelector = (sel) => {
 };
 
 const specEarly = JSON.parse(process.argv[3]);
-const location = { search: specEarly.vision === "1" ? "" : "?vision=0" };
+let search = specEarly.vision === "1" ? "" : "?vision=0";
+if (specEarly.lap === "1") search += (search ? "&" : "?") + "lap=1";
+const location = { search };
 let nowMs = 0;
 const window = global;
 window.window = window;
@@ -626,6 +628,40 @@ if (spec.cmd === "dom") {
   process.stdout.write(JSON.stringify({
     beforeHidden, beforeFold, afterVHidden, afterRepeat, afterClickFold, hiddenBeforeType, hiddenAfterType,
   }));
+} else if (spec.cmd === "lap") {
+  const player = {
+    x: 10,
+    z: 0.5,
+    speed: 0.2,
+    target: 4,
+    route: { points: [{ x: 0, z: 0 }, { x: 10, z: 0 }] },
+  };
+  const sim = {
+    complete: false,
+    freeExplore: false,
+    autopilot: true,
+    chained: false,
+    player,
+    world: { seed: 42 },
+    step() {
+      const last = player.route.points[player.route.points.length - 1];
+      const dist = Math.hypot(player.x - last.x, player.z - last.z);
+      if (!sim.complete && dist < 3 && Math.abs(player.speed) < 1) {
+        player.route = { points: [{ x: 0, z: 80 }] };
+        sim.complete = false;
+        sim.chained = true;
+      }
+    },
+  };
+  window.SEMIF_SIM = sim;
+  window.SEMIF_WORLD = {};
+  window.__raf();
+  sim.step(0.016);
+  process.stdout.write(JSON.stringify({
+    complete: sim.complete,
+    chained: sim.chained,
+    target: player.target,
+  }));
 } else {
   throw new Error("unknown cmd");
 }
@@ -659,6 +695,14 @@ def _run(cmd: dict, view: list[float] | None = None) -> dict:
     if proc.returncode != 0:
         raise AssertionError(proc.stderr[-2000:] or proc.stdout[-2000:] or "node failed")
     return json.loads(proc.stdout)
+
+
+def test_lap_query_stops_at_the_route_end():
+    """?lap=1 marks complete before the sim chains another destination."""
+    lap = _run({"cmd": "lap", "vision": "1", "lap": "1"})
+    assert lap["complete"] is True
+    assert lap["chained"] is False
+    assert lap["target"] == 0
 
 
 def test_pip_shell_is_in_the_loaded_overlay():

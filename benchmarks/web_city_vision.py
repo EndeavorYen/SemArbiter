@@ -45,7 +45,7 @@ _READ_LAP = """
 
 def lap_url(base: str, seed: int, vision_on: bool) -> str:
     root = base.rstrip("/")
-    query = f"seed={int(seed)}"
+    query = f"seed={int(seed)}&lap=1"
     if not vision_on:
         query += "&vision=0"
     return f"{root}/jevpilot/?{query}"

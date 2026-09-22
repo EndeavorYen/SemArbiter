@@ -45,6 +45,7 @@
   const intentEl = document.getElementById("fsd-intent");
   const latencyEl = document.getElementById("fsd-latency");
   const visionOn = params.get("vision") !== "0";
+  const lapOnce = params.get("lap") === "1";
   window.SEMIF_VISION = null;
   window.SEMIF_VISION_GEN = null;
 
@@ -556,6 +557,19 @@
     return true;
   }
 
+  function holdLapEnd(sim) {
+    if (!lapOnce || sim.complete || sim.freeExplore) return;
+    const player = sim.player;
+    const points = player && player.route && player.route.points;
+    if (!player || !points || !points.length) return;
+    const end = points[points.length - 1];
+    const dist = Math.hypot(player.x - end.x, player.z - end.z);
+    if (dist < 3 && Math.abs(player.speed) < 1) {
+      sim.complete = true;
+      player.target = 0;
+    }
+  }
+
   function tick() {
     const sim = window.SEMIF_SIM;
     const world = window.SEMIF_WORLD;
@@ -570,6 +584,11 @@
             applyLaneKeepReference(sim);
           } catch (_err) {
             /* PD must not kill the drive loop */
+          }
+          try {
+            holdLapEnd(sim);
+          } catch (_err) {
+            /* A finished lap must not kill the drive loop */
           }
           let out;
           try {
