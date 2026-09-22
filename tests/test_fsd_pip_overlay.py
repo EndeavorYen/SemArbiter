@@ -231,7 +231,7 @@ const visionIntervals = [];
 window.fetch = function () {
   return Promise.resolve({ ok: false, json: async () => ({}) });
 };
-if (specEarly.cmd === "upload" || specEarly.cmd === "vision-ack") {
+if (specEarly.cmd === "upload" || specEarly.cmd === "vision-ack" || specEarly.cmd === "vision-order") {
   global.setInterval = (fn, ms) => {
     visionIntervals.push(ms);
     return visionIntervals.length;
@@ -256,6 +256,20 @@ if (specEarly.cmd === "vision-ack") {
     const body = replies[Math.min(replyAt, replies.length - 1)];
     if (href.indexOf("/v1/vision") !== -1) replyAt += 1;
     return Promise.resolve({ ok: true, json: async () => body });
+  };
+}
+if (specEarly.cmd === "vision-order") {
+  const pending = [];
+  window.__releaseVision = (index, body) => {
+    const resolve = pending[index];
+    if (resolve) resolve({ ok: true, json: async () => body });
+  };
+  window.fetch = function (url) {
+    const href = typeof url === "string" ? url : "";
+    if (href.indexOf("/v1/vision") === -1) {
+      return Promise.resolve({ ok: false, json: async () => ({}) });
+    }
+    return new Promise((resolve) => { pending.push(resolve); });
   };
 }
 if (specEarly.cmd === "upload") {
@@ -493,6 +507,62 @@ if (spec.cmd === "dom") {
     fps: fps.textContent,
     renders,
   }));
+} else if (spec.cmd === "vision-order") {
+  canvas.toDataURL = () => "data:image/jpeg;base64,ONBOARD";
+  function makeCam() {
+    const cam = {
+      fov: 52,
+      aspect: 1,
+      position: { x: 0, y: 0, z: 0, set(x, y, z) { this.x = x; this.y = y; this.z = z; } },
+      lookAt(x, y, z) { this.look = { x, y, z }; },
+      updateProjectionMatrix() {},
+      updateMatrixWorld() {},
+    };
+    cam.clone = () => makeCam();
+    return cam;
+  }
+  function RT(w, h) {
+    this.w = w;
+    this.h = h;
+    this.isWebGLRenderTarget = true;
+    this.texture = {};
+  }
+  window.SEMIF_WORLD = {
+    scene: {},
+    player: { traverse() {} },
+    sim: { player: { x: 10, z: -4, heading: 0 } },
+    camera: makeCam(),
+    sun: { shadow: { map: { constructor: RT } } },
+    renderer: {
+      getRenderTarget() { return null; },
+      outputColorSpace: "srgb",
+      setRenderTarget() {},
+      render() {},
+      readRenderTargetPixels(_t, _x, _y, w, h, buf) { buf.fill(8); },
+    },
+  };
+  nowMs = 16;
+  window.__raf();
+  nowMs = 32;
+  window.__raf();
+  window.__releaseVision(1, {
+    vision: { signal: "red", event: "newer frame" },
+    vision_gen: 2,
+    vision_encode_ms: 5,
+  });
+  setImmediate(() => {
+    window.__releaseVision(0, {
+      vision: { signal: "green", event: "older frame" },
+      vision_gen: 1,
+      vision_encode_ms: 9,
+    });
+    setImmediate(() => {
+      process.stdout.write(JSON.stringify({
+        signal: window.SEMIF_VISION && window.SEMIF_VISION.signal,
+        gen: window.SEMIF_VISION_GEN,
+      }));
+    });
+  });
 } else if (spec.cmd === "vision-ack") {
   canvas.toDataURL = () => "data:image/jpeg;base64,ONBOARD";
   function makeCam() {
@@ -614,6 +684,13 @@ def test_each_display_frame_posts_onboard_jpeg():
     assert pumped["postTimes"] == pumped["tickTimes"]
     assert 700 not in pumped["intervals"]
     assert pumped["fps"] == "60 FPS"
+
+
+def test_late_older_vision_does_not_replace_newer_evidence():
+    """An older inference that arrives last leaves the newer evidence in place."""
+    ordered = _run({"cmd": "vision-order", "vision": "1"})
+    assert ordered["signal"] == "red"
+    assert ordered["gen"] == 2
 
 
 def test_empty_vision_ack_keeps_prior_evidence():

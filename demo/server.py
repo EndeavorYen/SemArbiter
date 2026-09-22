@@ -1121,17 +1121,20 @@ class _LatestVisionSlot:
         self._gen = 0
         self._running = False
         self._last: Optional[Dict[str, Any]] = None
+        self._last_gen: Optional[int] = None
 
-    def submit(self, image: str) -> tuple[bool, Optional[Dict[str, Any]]]:
+    def submit(self, image: str) -> tuple[bool, Optional[Dict[str, Any]], Optional[int]]:
         with self._lock:
             self._gen += 1
             self._image = image
+            last = dict(self._last) if isinstance(self._last, dict) else None
+            last_gen = self._last_gen
             if self._running:
-                return False, dict(self._last) if isinstance(self._last, dict) else None
+                return False, last, last_gen
             self._running = True
-            return True, dict(self._last) if isinstance(self._last, dict) else None
+            return True, last, last_gen
 
-    def run_until_idle(self, infer) -> tuple[Dict[str, Any], float]:
+    def run_until_idle(self, infer) -> tuple[Dict[str, Any], float, int]:
         """Infer the frame that started this cycle, then at most the newest one."""
         caught_up = False
         evidence: Dict[str, Any] = {}
@@ -1160,11 +1163,12 @@ class _LatestVisionSlot:
             with self._lock:
                 if isinstance(evidence, dict):
                     self._last = evidence
+                    self._last_gen = gen
                 if self._gen != gen and not caught_up:
                     caught_up = True
                     continue
                 self._running = False
-                return evidence, encode_ms
+                return evidence, encode_ms, gen
 
 
 _vision_slot = _LatestVisionSlot()
@@ -1186,16 +1190,22 @@ async def vision_endpoint(payload: Dict[str, Any]):
     image = payload.get("image") or payload.get("image_base64")
     if not isinstance(image, str) or len(image) < 64:
         return {"error": "image (data URL or base64) required"}
-    start, last = _vision_slot.submit(image)
+    start, last, last_gen = _vision_slot.submit(image)
     if not start:
         body: Dict[str, Any] = {}
         if isinstance(last, dict):
             body["vision"] = last
+            if isinstance(last_gen, int):
+                body["vision_gen"] = last_gen
         return body
-    evidence, vision_encode_ms = await asyncio.to_thread(
+    evidence, vision_encode_ms, vision_gen = await asyncio.to_thread(
         _vision_slot.run_until_idle, _infer_latest_jpeg
     )
-    return {"vision": evidence, "vision_encode_ms": vision_encode_ms}
+    return {
+        "vision": evidence,
+        "vision_encode_ms": vision_encode_ms,
+        "vision_gen": vision_gen,
+    }
 
 
 @app.post("/decide")

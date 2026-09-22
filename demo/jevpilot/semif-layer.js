@@ -46,6 +46,7 @@
   const latencyEl = document.getElementById("fsd-latency");
   const visionOn = params.get("vision") !== "0";
   window.SEMIF_VISION = null;
+  window.SEMIF_VISION_GEN = null;
 
   const telemetryCore = window.SEMIF_TELEMETRY_CORE;
   const telemetry = telemetryCore && telemetryCore.createLatencyTelemetry
@@ -647,7 +648,13 @@
         return;
       }
       const vis = data.vision;
+      const incoming = Number(data.vision_gen);
+      const held = Number(window.SEMIF_VISION_GEN);
+      if (Number.isFinite(incoming) && Number.isFinite(held) && incoming < held) {
+        return;
+      }
       window.SEMIF_VISION = vis;
+      if (Number.isFinite(incoming)) window.SEMIF_VISION_GEN = incoming;
       const encode = Number(data.vision_encode_ms);
       if (telemetry && Number.isFinite(encode)) {
         telemetry.recordVision({

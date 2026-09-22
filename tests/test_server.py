@@ -502,6 +502,23 @@ def test_v1_vision_worker_infers_one_catch_up_then_stops(mock_engine, monkeypatc
         raise failure[0]
 
 
+def test_v1_vision_labels_evidence_with_monotonic_gen(mock_engine, monkeypatch):
+    """Each finished inference carries a generation newer than the previous one."""
+    reset_vision_slot()
+
+    class _Dummy:
+        def infer_b64(self, image: str):
+            return {"signal": "green", "event": "road clear ahead", "backend": "stub"}
+
+    monkeypatch.setattr("semif_phase1.vision.get_vision_encoder", lambda: _Dummy())
+    client = TestClient(app)
+    image = _tiny_jpeg_data_url()
+    first = client.post("/v1/vision", json={"image": image + "AAA"}).json()
+    second = client.post("/v1/vision", json={"image": image + "BBB"}).json()
+    assert isinstance(first["vision_gen"], int)
+    assert second["vision_gen"] > first["vision_gen"]
+
+
 def test_v1_vision_returns_vision_encode_ms(mock_engine):
     client = TestClient(app)
     resp = client.post("/v1/vision", json={"image": _tiny_jpeg_data_url()})
