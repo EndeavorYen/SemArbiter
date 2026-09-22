@@ -46,6 +46,7 @@
   const latencyEl = document.getElementById("fsd-latency");
   const visionOn = params.get("vision") !== "0";
   window.SEMIF_VISION = null;
+  window.SEMIF_VISION_GEN = null;
 
   const telemetryCore = window.SEMIF_TELEMETRY_CORE;
   const telemetry = telemetryCore && telemetryCore.createLatencyTelemetry
@@ -594,11 +595,14 @@
       if (seed != null && document.activeElement !== seedInput) seedInput.value = String(seed);
       drawBoxes(sim, world);
     }
+    let painted = false;
     try {
-      if (renderOnboard(world) && pipFps) pipFps.textContent = pipFpsText(performance.now());
+      painted = !!renderOnboard(world);
+      if (painted && pipFps) pipFps.textContent = pipFpsText(performance.now());
     } catch (_err) {
       /* The onboard view must not kill the drive loop */
     }
+    if (painted) visionTick(true);
     requestAnimationFrame(tick);
   }
 
@@ -612,13 +616,15 @@
 
   window.SEMIF_GRAB_FRAME = grabFrame;
 
-  async function visionTick() {
+  async function visionTick(alreadyPainted) {
     if (!visionOn) {
       visionEl.textContent = "VISION off";
       return;
     }
     const tGrab = performance.now();
-    const dataUrl = grabFrame();
+    const dataUrl = alreadyPainted && pipCanvas
+      ? pipCanvas.toDataURL("image/jpeg", 0.55)
+      : grabFrame();
     const grabMs = performance.now() - tGrab;
     if (!dataUrl) {
       visionEl.textContent = "VISION waiting";
@@ -637,20 +643,26 @@
         visionEl.textContent = "VISION error";
         return;
       }
-      const vis = data.vision || data;
+      if (!data.vision || typeof data.vision !== "object") {
+        visionEl.textContent = "VISION waiting";
+        return;
+      }
+      const vis = data.vision;
+      const incoming = Number(data.vision_gen);
+      const held = Number(window.SEMIF_VISION_GEN);
+      if (Number.isFinite(incoming) && Number.isFinite(held) && incoming < held) {
+        return;
+      }
       window.SEMIF_VISION = vis;
-      if (telemetry) {
-        const encode = Number(
-          data.vision_encode_ms != null ? data.vision_encode_ms : vis.latency_ms
-        );
-        if (Number.isFinite(encode)) {
-          telemetry.recordVision({
-            encode_ms: encode,
-            rtt_ms: rttMs,
-            grab_ms: grabMs,
-          });
-          refreshLatencyHud();
-        }
+      if (Number.isFinite(incoming)) window.SEMIF_VISION_GEN = incoming;
+      const encode = Number(data.vision_encode_ms);
+      if (telemetry && Number.isFinite(encode)) {
+        telemetry.recordVision({
+          encode_ms: encode,
+          rtt_ms: rttMs,
+          grab_ms: grabMs,
+        });
+        refreshLatencyHud();
       }
       const sig = vis.signal || "unknown";
       visionEl.textContent = vis.event
@@ -667,8 +679,4 @@
     }
   }
 
-  if (visionOn) {
-    setInterval(visionTick, 700);
-    setTimeout(visionTick, 1500);
-  }
 })();
