@@ -579,9 +579,11 @@
   function finishLap(sim, before) {
     if (!before || sim.crash) return;
     const player = sim.player;
+    if (!player) return;
     const end = routeEnd(player);
-    const changed = !end || end !== before.end || player.route !== before.route;
-    if (before.dist < 3 && Math.abs(before.speed) < 1 && changed) {
+    const changed = player.route !== before.route || end !== before.end;
+    const dist = Math.hypot(player.x - before.end.x, player.z - before.end.z);
+    if (changed && dist < 3 && player.speed < 1) {
       player.route = before.route;
       player.target = 0;
       player.speed = 0;

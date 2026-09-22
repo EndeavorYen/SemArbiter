@@ -630,9 +630,9 @@ if (spec.cmd === "dom") {
   }));
 } else if (spec.cmd === "lap") {
   const player = {
-    x: 10,
-    z: 0.5,
-    speed: 0.2,
+    x: 6,
+    z: 0,
+    speed: 2,
     target: 4,
     route: { points: [{ x: 0, z: 0 }, { x: 10, z: 0 }] },
   };
@@ -644,9 +644,11 @@ if (spec.cmd === "dom") {
     player,
     world: { seed: 42 },
     step() {
+      player.x = 9.8;
+      player.speed = 0.2;
       const last = player.route.points[player.route.points.length - 1];
       const dist = Math.hypot(player.x - last.x, player.z - last.z);
-      if (!sim.complete && dist < 3 && Math.abs(player.speed) < 1) {
+      if (!sim.complete && dist < 3 && player.speed < 1) {
         player.route = { points: [{ x: 0, z: 80 }] };
         sim.complete = false;
         sim.chained = true;
