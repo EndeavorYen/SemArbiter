@@ -182,3 +182,33 @@ def test_synthetic_vision_closed_loop_mock():
     vis = run_jevpilot2_episode(engine, "flat", "traffic_light_red", 42, raw_mode=True, vision_mode="synthetic")
     assert vis["vision_mode"] == "synthetic"
     assert off["seed"] == vis["seed"] == 42
+
+
+def test_jevpilot2_clip_refuses_before_schematic_frame(monkeypatch):
+    calls = []
+
+    def _render(*_args, **_kwargs):
+        calls.append("render")
+        raise AssertionError("schematic frame")
+
+    class _Encoder:
+        backend = "siglip"
+        last_blobs = None
+        last_scores = None
+
+        def infer_pil(self, _image):
+            return {"backend": "siglip"}
+
+    monkeypatch.setattr("semif_phase1.vision.render_scenario_frame", _render)
+    monkeypatch.setattr("semif_phase1.vision.get_vision_encoder", lambda: _Encoder())
+    engine = DecisionEngine(use_mock=True)
+    with pytest.raises(RuntimeError, match="web city"):
+        run_jevpilot2_episode(
+            engine,
+            "flat",
+            "traffic_light_red",
+            42,
+            raw_mode=True,
+            vision_mode="clip",
+        )
+    assert calls == []

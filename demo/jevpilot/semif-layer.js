@@ -45,6 +45,7 @@
   const intentEl = document.getElementById("fsd-intent");
   const latencyEl = document.getElementById("fsd-latency");
   const visionOn = params.get("vision") !== "0";
+  const lapOnce = params.get("lap") === "1";
   window.SEMIF_VISION = null;
   window.SEMIF_VISION_GEN = null;
 
@@ -556,6 +557,42 @@
     return true;
   }
 
+  function routeEnd(player) {
+    const points = player && player.route && player.route.points;
+    if (!points || !points.length) return null;
+    return points[points.length - 1];
+  }
+
+  function lapSnapshot(sim) {
+    if (!lapOnce || sim.complete || sim.freeExplore || sim.crash) return null;
+    const player = sim.player;
+    const end = routeEnd(player);
+    if (!player || !end) return null;
+    return {
+      route: player.route,
+      end,
+      s: player.s,
+      dist: Math.hypot(player.x - end.x, player.z - end.z),
+      speed: player.speed,
+    };
+  }
+
+  function finishLap(sim, before) {
+    if (!before || sim.crash) return;
+    const player = sim.player;
+    if (!player) return;
+    const end = routeEnd(player);
+    const changed = player.route !== before.route || end !== before.end;
+    const dist = Math.hypot(player.x - before.end.x, player.z - before.end.z);
+    if (changed && dist < 3 && player.speed < 1) {
+      player.route = before.route;
+      player.s = before.s;
+      player.target = 0;
+      player.speed = 0;
+      sim.complete = true;
+    }
+  }
+
   function tick() {
     const sim = window.SEMIF_SIM;
     const world = window.SEMIF_WORLD;
@@ -571,12 +608,18 @@
           } catch (_err) {
             /* PD must not kill the drive loop */
           }
+          const lapBefore = lapSnapshot(sim);
           let out;
           try {
             out = orig(dt);
           } catch (err) {
             console.warn("semif: sim.step", err);
             return out;
+          }
+          try {
+            finishLap(sim, lapBefore);
+          } catch (_err) {
+            /* A finished lap must not kill the drive loop */
           }
           try {
             injectFrustumEvents(sim, Math.min(dt || 0.016, 0.05));

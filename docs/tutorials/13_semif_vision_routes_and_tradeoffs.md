@@ -34,7 +34,7 @@
 
 ### 1. 閉環實測數據（Qwen2.5-3B-Instruct，CUDA Seed 42）
 
-在統一幾何採樣器（Same Trajectory Pool）的無偏閉環測試中，`results/phase5-jevpilot-vision-clip-cuda.json` 記錄了真實的 CUDA 閉環數據：
+下面這張表是已退役的 JevPilot2 PIL 示意幀測量，不是現在的官方 CUDA 視覺分數。官方分數是教程 12 的網頁城市兩趟；`results/phase5-jevpilot-vision-cuda.json` 不是這張表的延續。`results/phase5-jevpilot-vision-clip-cuda.json` 留下的是當年色塊閉環：
 
 | 評測模式 | 視覺機制 | 乾淨完成率 (Clean Rate) | 急動度 (Jerk RMS on Clean) | 決策延遲 (P50) | 機制歸因與備註 |
 | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -47,7 +47,7 @@
 ### 2. 數據與機制的真實歸因
 
 1. **70% 完成率來自「文字證據干擾決策」而非「Patch 雜訊」**：  
-   在官方跑測的 `phase5-jevpilot-vision-clip-cuda.json` 中，CLIP 讀取 PIL 示意幀並將 `signal: red`、`pedestrian: 0.88` 等數值寫入 `state.vision`。實測表明，即使是高階文字證據，在未精細校準先驗時，也會對遙測常識判斷產生非預期干擾，導致完成率自 75% 跌至 70%。
+   退役測量 `phase5-jevpilot-vision-clip-cuda.json` 裡，編碼器讀的是 PIL 示意幀，並把 `signal: red`、`pedestrian: 0.88` 這類數值寫入 `state.vision`。那次測量裡，文字證據讓完成率自 75% 跌至 70%。那不是網頁城市的官方分數。
 2. **延遲自 ~49 ms 升至 ~87 ms 來自「1024 桶效應」**：  
    加入 `vision.*` 欄位後，Prompt 長度增加，突破了 512-bucket 上限，落入 1024-bucket（如教程 11 所示，形狀分桶擴大導致推論耗時上升），而非 CUDA Graph 被前綴打掉。
 3. **未訓練 Patch 前綴（`VisualPrefixProjector`）的機制定位**：  
@@ -57,7 +57,7 @@
 
 ### 3. 最新實測突破：相機幀時序事件（Phase 5 Temporal Events）
 
-針對靜態裸浮點數（`vehicle: 0.8`）導致完成率暴跌至 60% 的問題，我們進一步實作了「純相機幀時序差分（Frame-to-Frame Temporal Events）」，實測數據記錄於 `results/phase5-jevpilot-vision-frame-event-cuda.json`：
+針對靜態裸浮點數（`vehicle: 0.8`）導致完成率暴跌至 60% 的問題，當時在同一套 JevPilot2 色塊閉環上加了「純相機幀時序差分（Frame-to-Frame Temporal Events）」。數字在 `results/phase5-jevpilot-vision-frame-event-cuda.json`。那仍是退役世界，不是網頁城市官方分數：
 
 | 評測模式 | 視覺機制 | 乾淨完成率 (Clean Rate) | 決策延遲 (P50) | 加塞避讓 (Cut-in) | 備註 |
 | :--- | :--- | :--- | :--- | :--- | :--- |
