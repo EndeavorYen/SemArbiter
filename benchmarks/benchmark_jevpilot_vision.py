@@ -1,4 +1,4 @@
-"""Telemetry-only vs synthetic-vision closed loop. Same sampler; vision is evidence only."""
+"""Mock loop stays on synthetic labels. Official scores are two web-city laps."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from benchmarks.benchmark_jevpilot_hierarchical import evaluate_jevpilot2_mode
 from benchmarks.driving_quality import compare_driving
+from benchmarks.web_city_vision import OFFICIAL_REPORT, run_official_web_city
 from demo.server import DecisionEngine
 from semif_phase1.latency_telemetry import align_web_export, summarize_latency
 
@@ -24,7 +25,8 @@ def main() -> None:
     parser.add_argument("--mock", action="store_true")
     parser.add_argument("--episodes", type=int, default=2)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--output", default="results/phase5-jevpilot-vision-mock.json")
+    parser.add_argument("--output", default=None)
+    parser.add_argument("--lap-timeout-s", type=float, default=180)
     parser.add_argument(
         "--web-telemetry",
         default=None,
@@ -32,18 +34,25 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    engine = DecisionEngine(use_mock=args.mock, device=None if args.mock else "cuda")
-    vision_backend = "synthetic" if args.mock else "unknown"
     if not args.mock:
-        from semif_phase1.vision import get_vision_encoder
+        output = Path(args.output) if args.output else OFFICIAL_REPORT
+        report = run_official_web_city(seed=args.seed, output=output, lap_timeout_s=args.lap_timeout_s)
+        print(json.dumps({
+            "output": report["official_report"],
+            "seed": report["seed"],
+            "device": report["device"],
+            "mock": report["mock"],
+            "world": report["world"],
+            "laps": report["laps"],
+        }, indent=2))
+        return
 
-        enc = get_vision_encoder()
-        if enc.backend == "stub":
-            raise SystemExit("vision encoder required for official scores (got stub)")
-        vision_backend = enc.backend
+    output = args.output or "results/phase5-jevpilot-vision-mock.json"
+    engine = DecisionEngine(use_mock=True)
+    vision_backend = "synthetic"
     arms = {}
     loop_latencies: dict = {}
-    vision_arm = "synthetic" if args.mock else "clip"
+    vision_arm = "synthetic"
     for vision_mode in ("off", vision_arm):
         eps = {}
         compact = {}
@@ -71,7 +80,7 @@ def main() -> None:
         "benchmark": "JevPilot vision vs telemetry (same sampler)",
         "seed": args.seed,
         "mock": args.mock,
-        "model": engine.model_name if not args.mock else "MockDecisionEngine",
+        "model": "MockDecisionEngine",
         "device": engine.device,
         "vision_backend": vision_backend,
         "visual_prefix": os.environ.get("SEMIF_VISION_PREFIX", "0"),
@@ -89,10 +98,11 @@ def main() -> None:
                 "vision_mode": vision_arm,
             },
         )
-    Path(args.output).parent.mkdir(parents=True, exist_ok=True)
-    Path(args.output).write_text(json.dumps(report, indent=2), encoding="utf-8")
+    out = Path(output)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(json.dumps({
-        "output": args.output,
+        "output": str(out),
         "ranking": {arm: data["driving_quality"]["ranking"] for arm, data in arms.items()},
         "clean": {
             arm: {m: data["driving_quality"]["modes"][m]["clean_completion_rate"] for m in data["driving_quality"]["modes"]}

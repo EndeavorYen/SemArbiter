@@ -458,6 +458,10 @@ def run_jevpilot2_episode(
     on_step: Optional[Any] = None,
     use_camera_obstacles: bool = True,
 ) -> Dict[str, Any]:
+    if vision_mode == "clip":
+        raise RuntimeError(
+            "JevPilot2 vision_mode=clip is refused; official vision scores use the web city onboard camera"
+        )
     env = JevPilot2Simulator(scenario, seed=seed, raw_mode=raw_mode)
     env.use_camera_obstacles = use_camera_obstacles
     latencies = []
@@ -468,12 +472,6 @@ def run_jevpilot2_episode(
     chosen_id = "v1"
     last_obs: Optional[Dict[str, Any]] = None
     is_ood = False
-    if vision_mode == "clip":
-        from semif_phase1.vision import get_vision_encoder
-
-        _enc = get_vision_encoder()
-        _enc.last_blobs = None
-        _enc.last_scores = None
 
     while True:
         if step_count % decision_interval == 0:
@@ -483,14 +481,6 @@ def run_jevpilot2_episode(
 
                 obs = dict(obs)
                 obs["vision"] = vision_from_scenario(scenario)
-            elif vision_mode == "clip":
-                from semif_phase1.vision import get_vision_encoder, render_scenario_frame
-
-                encoder = get_vision_encoder()
-                if encoder.backend == "stub":
-                    raise RuntimeError("CLIP did not load; refuse synthetic scores for clip mode")
-                obs = dict(obs)
-                obs["vision"] = encoder.infer_pil(render_scenario_frame(scenario, env))
             req = {
                 "model": engine.model_name,
                 "mode": mode,
