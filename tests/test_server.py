@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import threading
+
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -12,7 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from demo.server import DecisionEngine, app, DRIVING_ACTIONS, ACTION_IDS
+from demo.server import DecisionEngine, app, DRIVING_ACTIONS, ACTION_IDS, reset_vision_slot
 
 
 @pytest.fixture(scope="module")
@@ -353,6 +357,72 @@ def test_v1_classifier_returns_classifier_ms(mock_engine):
     assert isinstance(data["meta"]["classifier_ms"], float)
     assert data["meta"]["classifier_ms"] >= 0.0
     assert data["classifier_ms"] == data["meta"]["classifier_ms"]
+
+
+def test_v1_vision_overlapping_post_keeps_only_the_latest(mock_engine, monkeypatch):
+    """A newer JPEG returns before the in-flight infer finishes, then only that JPEG is inferred."""
+    reset_vision_slot()
+    started = threading.Event()
+    release = threading.Event()
+    seen: list[str] = []
+    image_a = _tiny_jpeg_data_url() + "AAA"
+    image_b = _tiny_jpeg_data_url() + "BBB"
+
+    class _Dummy:
+        def infer_b64(self, image: str):
+            seen.append(image)
+            if len(seen) == 1:
+                started.set()
+                assert release.wait(3)
+            return {"signal": "green", "event": "road clear ahead", "backend": "stub"}
+
+    monkeypatch.setattr(
+        "semif_phase1.vision.get_vision_encoder",
+        lambda: _Dummy(),
+    )
+
+    async def _scenario():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://vision") as client:
+            first = asyncio.create_task(
+                client.post("/v1/vision", json={"image": image_a})
+            )
+            assert await asyncio.to_thread(started.wait, 2)
+            second = await asyncio.wait_for(
+                client.post("/v1/vision", json={"image": image_b}),
+                timeout=0.5,
+            )
+            assert second.status_code == 200
+            assert "vision_encode_ms" not in second.json()
+            release.set()
+            first_resp = await first
+        assert first_resp.status_code == 200
+        deadline = asyncio.get_running_loop().time() + 2
+        while len(seen) < 2 and asyncio.get_running_loop().time() < deadline:
+            await asyncio.sleep(0.01)
+        assert seen == [image_a, image_b]
+
+    finished = threading.Event()
+    failure: list[BaseException] = []
+
+    def _run_scenario():
+        try:
+            asyncio.run(_scenario())
+        except BaseException as exc:
+            failure.append(exc)
+        finally:
+            release.set()
+            finished.set()
+
+    worker = threading.Thread(target=_run_scenario)
+    worker.start()
+    if not finished.wait(1.5):
+        release.set()
+        worker.join(3)
+        raise AssertionError("superseded /v1/vision post did not return while infer was running")
+    worker.join(3)
+    if failure:
+        raise failure[0]
 
 
 def test_v1_vision_returns_vision_encode_ms(mock_engine):

@@ -28,7 +28,7 @@ python benchmarks/benchmark_jevpilot_vision.py --episodes 2 --seed 42 \
   --output results/phase5-jevpilot-vision-cuda.json
 ```
 
-第一次真實視覺會下載 **SigLIP** `google/siglip-base-patch16-224`（#48）。視覺主要角色為**慢迴圈可供性提取**：編碼器將路況提煉為 `red/pedestrian` 等短分數，注入 `state.vision` 與 HUD，快迴圈維持純文字 Sliced Head + 512 桶 CUDA Graph 進行動態選軌。
+第一次真實視覺會下載 **SigLIP** `google/siglip-base-patch16-224`（#48）。車載 JPEG 跟顯示幀送進 `/v1/vision`。SigLIP 只推論伺服器槽裡最新的一張，完成次數可以低於顯示幀率。編碼器把那張圖提煉為 `red/pedestrian` 等短分數，注入 `state.vision` 與 HUD。快迴圈仍是純文字 Sliced Head + 512 桶 CUDA Graph。
 
 實驗性 Patch 前綴（不作預設）：`SEMIF_VISION_PREFIX=1`。未訓練投影，會關 CUDA Graph。尚未 CUDA 閉環（詳見 [教程 13](13_semif_vision_routes_and_tradeoffs.md)）。`compact_jev_state` 不放 `backend` / `prefix_tokens`，避免撐破 512 桶。
 
@@ -38,7 +38,7 @@ python benchmarks/benchmark_jevpilot_vision.py --episodes 2 --seed 42 \
 
 ```mermaid
 flowchart LR
-    Canvas["3D canvas JPEG"] --> Vision["/v1/vision SigLIP (慢迴圈 10-20Hz)"]
+    Canvas["3D canvas JPEG，每顯示幀上傳"] --> Vision["/v1/vision SigLIP 只吃最新一張"]
     Vision --> Evidence["state.vision.event (一句相機事件)"]
     Sampler["幾何採樣器 tXX"] --> Cands["candidates"]
     Evidence --> State["compact_jev_state"]

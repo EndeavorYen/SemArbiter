@@ -594,11 +594,14 @@
       if (seed != null && document.activeElement !== seedInput) seedInput.value = String(seed);
       drawBoxes(sim, world);
     }
+    let painted = false;
     try {
-      if (renderOnboard(world) && pipFps) pipFps.textContent = pipFpsText(performance.now());
+      painted = !!renderOnboard(world);
+      if (painted && pipFps) pipFps.textContent = pipFpsText(performance.now());
     } catch (_err) {
       /* The onboard view must not kill the drive loop */
     }
+    if (painted) visionTick();
     requestAnimationFrame(tick);
   }
 
@@ -637,20 +640,20 @@
         visionEl.textContent = "VISION error";
         return;
       }
-      const vis = data.vision || data;
+      if (!data.vision || typeof data.vision !== "object") {
+        visionEl.textContent = "VISION waiting";
+        return;
+      }
+      const vis = data.vision;
       window.SEMIF_VISION = vis;
-      if (telemetry) {
-        const encode = Number(
-          data.vision_encode_ms != null ? data.vision_encode_ms : vis.latency_ms
-        );
-        if (Number.isFinite(encode)) {
-          telemetry.recordVision({
-            encode_ms: encode,
-            rtt_ms: rttMs,
-            grab_ms: grabMs,
-          });
-          refreshLatencyHud();
-        }
+      const encode = Number(data.vision_encode_ms);
+      if (telemetry && Number.isFinite(encode)) {
+        telemetry.recordVision({
+          encode_ms: encode,
+          rtt_ms: rttMs,
+          grab_ms: grabMs,
+        });
+        refreshLatencyHud();
       }
       const sig = vis.signal || "unknown";
       visionEl.textContent = vis.event
@@ -667,8 +670,4 @@
     }
   }
 
-  if (visionOn) {
-    setInterval(visionTick, 700);
-    setTimeout(visionTick, 1500);
-  }
 })();

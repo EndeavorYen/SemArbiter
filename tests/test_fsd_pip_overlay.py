@@ -213,7 +213,8 @@ document.querySelector = (sel) => {
   return found;
 };
 
-const location = { search: "?vision=0" };
+const specEarly = JSON.parse(process.argv[3]);
+const location = { search: specEarly.vision === "1" ? "" : "?vision=0" };
 let nowMs = 0;
 const window = global;
 window.window = window;
@@ -225,9 +226,48 @@ window.requestAnimationFrame = (fn) => {
   return 1;
 };
 window.cancelAnimationFrame = () => {};
+const visionPosts = [];
+const visionIntervals = [];
 window.fetch = function () {
   return Promise.resolve({ ok: false, json: async () => ({}) });
 };
+if (specEarly.cmd === "upload" || specEarly.cmd === "vision-ack") {
+  global.setInterval = (fn, ms) => {
+    visionIntervals.push(ms);
+    return visionIntervals.length;
+  };
+  global.setTimeout = () => 1;
+}
+if (specEarly.cmd === "vision-ack") {
+  window.SEMIF_TELEMETRY_CORE = {
+    createLatencyTelemetry() {
+      const api = {
+        records: [],
+        recordVision(row) { api.records.push(row); },
+        hudText() { return "hud"; },
+      };
+      return api;
+    },
+  };
+  const replies = specEarly.replies || [{}];
+  let replyAt = 0;
+  window.fetch = function (url) {
+    const href = typeof url === "string" ? url : "";
+    const body = replies[Math.min(replyAt, replies.length - 1)];
+    if (href.indexOf("/v1/vision") !== -1) replyAt += 1;
+    return Promise.resolve({ ok: true, json: async () => body });
+  };
+}
+if (specEarly.cmd === "upload") {
+  window.fetch = function (url) {
+    const href = typeof url === "string" ? url : "";
+    if (href.indexOf("/v1/vision") !== -1) visionPosts.push(nowMs);
+    return Promise.resolve({
+      ok: true,
+      json: async () => ({ vision: { signal: "green" }, vision_encode_ms: 3 }),
+    });
+  };
+}
 window.URL = { createObjectURL: () => "blob:pip", revokeObjectURL() {} };
 global.document = document;
 global.location = location;
@@ -268,7 +308,7 @@ function boot(sim, world) {
   return plainOps(canvas.__ctx.ops);
 }
 
-const spec = JSON.parse(process.argv[3]);
+const spec = specEarly;
 const view = JSON.parse(process.argv[2]);
 const out = { title: title && title.textContent, fps0: fps && fps.textContent, canvas: canvas && { w: canvas.width, h: canvas.height }, hasPip: !!pip };
 
@@ -394,6 +434,104 @@ if (spec.cmd === "dom") {
     ops: plainOps(canvas.__ctx.ops),
     fps: fps.textContent,
   }));
+} else if (spec.cmd === "upload") {
+  canvas.toDataURL = () => "data:image/jpeg;base64,ONBOARD";
+  function makeCam() {
+    const cam = {
+      fov: 52,
+      aspect: 1,
+      position: { x: 0, y: 0, z: 0, set(x, y, z) { this.x = x; this.y = y; this.z = z; } },
+      lookAt(x, y, z) { this.look = { x, y, z }; },
+      updateProjectionMatrix() {},
+      updateMatrixWorld() {},
+    };
+    cam.clone = () => makeCam();
+    return cam;
+  }
+  function RT(w, h) {
+    this.w = w;
+    this.h = h;
+    this.isWebGLRenderTarget = true;
+    this.texture = {};
+  }
+  window.SEMIF_WORLD = {
+    mode: "chase",
+    scene: {},
+    player: { traverse() {} },
+    sim: { player: { x: 10, z: -4, heading: Math.PI / 2 } },
+    camera: makeCam(),
+    sun: { shadow: { map: { constructor: RT } } },
+    renderer: {
+      getRenderTarget() { return null; },
+      outputColorSpace: "srgb",
+      setRenderTarget() {},
+      render() {},
+      readRenderTargetPixels(_t, _x, _y, w, h, buf) { buf.fill(8); },
+    },
+  };
+  const frames = spec.frames || 120;
+  const dt = 1000 / 60;
+  const ticks = [];
+  nowMs = 0;
+  for (let i = 0; i < frames; i++) {
+    nowMs += dt;
+    ticks.push(nowMs);
+    window.__raf();
+  }
+  process.stdout.write(JSON.stringify({
+    posts: visionPosts.length,
+    postTimes: visionPosts,
+    tickTimes: ticks,
+    intervals: visionIntervals,
+    fps: fps.textContent,
+  }));
+} else if (spec.cmd === "vision-ack") {
+  canvas.toDataURL = () => "data:image/jpeg;base64,ONBOARD";
+  function makeCam() {
+    const cam = {
+      fov: 52,
+      aspect: 1,
+      position: { x: 0, y: 0, z: 0, set(x, y, z) { this.x = x; this.y = y; this.z = z; } },
+      lookAt(x, y, z) { this.look = { x, y, z }; },
+      updateProjectionMatrix() {},
+      updateMatrixWorld() {},
+    };
+    cam.clone = () => makeCam();
+    return cam;
+  }
+  function RT(w, h) {
+    this.w = w;
+    this.h = h;
+    this.isWebGLRenderTarget = true;
+    this.texture = {};
+  }
+  window.SEMIF_WORLD = {
+    scene: {},
+    player: { traverse() {} },
+    sim: { player: { x: 10, z: -4, heading: 0 } },
+    camera: makeCam(),
+    sun: { shadow: { map: { constructor: RT } } },
+    renderer: {
+      getRenderTarget() { return null; },
+      outputColorSpace: "srgb",
+      setRenderTarget() {},
+      render() {},
+      readRenderTargetPixels(_t, _x, _y, w, h, buf) { buf.fill(8); },
+    },
+  };
+  const replies = spec.replies || [{}];
+  nowMs = 0;
+  for (let i = 0; i < replies.length; i++) {
+    nowMs += 16;
+    window.__raf();
+  }
+  setImmediate(() => {
+    process.stdout.write(JSON.stringify({
+      vision: window.SEMIF_VISION,
+      text: document.getElementById("fsd-vision").textContent,
+      records: (window.SEMIF_TELEMETRY && window.SEMIF_TELEMETRY.records) || [],
+    }));
+  });
 } else if (spec.cmd === "keys") {
   const beforeHidden = pip.classList.contains("fsd-pip-hidden");
   const beforeFold = pip.classList.contains("fsd-pip-collapsed");
@@ -458,6 +596,34 @@ def test_pip_shell_is_in_the_loaded_overlay():
     assert "pointer-events: auto" in css
     assert "fsd-pip-collapsed" in css
     assert "fsd-pip-hidden" in css
+
+
+def test_each_display_frame_posts_onboard_jpeg():
+    """Live tick posts one /v1/vision JPEG per painted onboard frame."""
+    pumped = _run({"cmd": "upload", "vision": "1", "frames": 120})
+    assert pumped["posts"] == 120
+    assert pumped["postTimes"] == pumped["tickTimes"]
+    assert 700 not in pumped["intervals"]
+    assert pumped["fps"] == "60 FPS"
+
+
+def test_empty_vision_ack_keeps_prior_evidence():
+    """A reply without vision does not replace evidence or record encode time."""
+    ack = _run({
+        "cmd": "vision-ack",
+        "vision": "1",
+        "replies": [
+            {
+                "vision": {"signal": "green", "event": "road clear ahead"},
+                "vision_encode_ms": 4,
+            },
+            {},
+        ],
+    })
+    assert ack["vision"]["signal"] == "green"
+    assert ack["text"] == "VISION waiting"
+    assert ack["records"] == [{"encode_ms": 4, "rtt_ms": ack["records"][0]["rtt_ms"], "grab_ms": ack["records"][0]["grab_ms"]}]
+    assert len(ack["records"]) == 1
 
 
 def test_pip_shows_the_fixed_onboard_camera_not_the_player_view():
