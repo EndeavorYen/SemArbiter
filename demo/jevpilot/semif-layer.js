@@ -601,7 +601,7 @@
     } catch (_err) {
       /* The onboard view must not kill the drive loop */
     }
-    if (painted) visionTick();
+    if (painted) visionTick(true);
     requestAnimationFrame(tick);
   }
 
@@ -615,13 +615,15 @@
 
   window.SEMIF_GRAB_FRAME = grabFrame;
 
-  async function visionTick() {
+  async function visionTick(alreadyPainted) {
     if (!visionOn) {
       visionEl.textContent = "VISION off";
       return;
     }
     const tGrab = performance.now();
-    const dataUrl = grabFrame();
+    const dataUrl = alreadyPainted && pipCanvas
+      ? pipCanvas.toDataURL("image/jpeg", 0.55)
+      : grabFrame();
     const grabMs = performance.now() - tGrab;
     if (!dataUrl) {
       visionEl.textContent = "VISION waiting";

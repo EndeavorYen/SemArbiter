@@ -425,6 +425,83 @@ def test_v1_vision_overlapping_post_keeps_only_the_latest(mock_engine, monkeypat
         raise failure[0]
 
 
+def test_v1_vision_worker_infers_one_catch_up_then_stops(mock_engine, monkeypatch):
+    """Frames that arrive during the catch-up infer wait for the next cycle."""
+    reset_vision_slot()
+    first_in = threading.Event()
+    first_go = threading.Event()
+    second_in = threading.Event()
+    second_go = threading.Event()
+    seen: list[str] = []
+    image_a = _tiny_jpeg_data_url() + "AAA"
+    image_b = _tiny_jpeg_data_url() + "BBB"
+    image_c = _tiny_jpeg_data_url() + "CCC"
+    image_d = _tiny_jpeg_data_url() + "DDD"
+
+    class _Dummy:
+        def infer_b64(self, image: str):
+            seen.append(image)
+            if len(seen) == 1:
+                first_in.set()
+                assert first_go.wait(3)
+            elif len(seen) == 2:
+                second_in.set()
+                assert second_go.wait(3)
+            return {"signal": "green", "event": "road clear ahead", "backend": "stub"}
+
+    monkeypatch.setattr("semif_phase1.vision.get_vision_encoder", lambda: _Dummy())
+
+    async def _scenario():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://vision") as client:
+            owner = asyncio.create_task(client.post("/v1/vision", json={"image": image_a}))
+            assert await asyncio.to_thread(first_in.wait, 2)
+            busy = await client.post("/v1/vision", json={"image": image_b})
+            assert busy.status_code == 200
+            assert "vision_encode_ms" not in busy.json()
+            first_go.set()
+            assert await asyncio.to_thread(second_in.wait, 2)
+            later = await asyncio.wait_for(
+                client.post("/v1/vision", json={"image": image_c}),
+                timeout=0.5,
+            )
+            assert later.status_code == 200
+            second_go.set()
+            owner_resp = await owner
+            assert owner_resp.status_code == 200
+            assert "vision_encode_ms" in owner_resp.json()
+            assert seen == [image_a, image_b]
+            follow = await client.post("/v1/vision", json={"image": image_d})
+            assert follow.status_code == 200
+            assert follow.json()["vision_encode_ms"] >= 0
+            assert seen[-1] == image_d
+            assert image_c not in seen
+
+    finished = threading.Event()
+    failure: list[BaseException] = []
+
+    def _run_scenario():
+        try:
+            asyncio.run(_scenario())
+        except BaseException as exc:
+            failure.append(exc)
+        finally:
+            first_go.set()
+            second_go.set()
+            finished.set()
+
+    worker = threading.Thread(target=_run_scenario)
+    worker.start()
+    if not finished.wait(3):
+        first_go.set()
+        second_go.set()
+        worker.join(3)
+        raise AssertionError("vision worker did not finish one catch-up cycle")
+    worker.join(3)
+    if failure:
+        raise failure[0]
+
+
 def test_v1_vision_returns_vision_encode_ms(mock_engine):
     client = TestClient(app)
     resp = client.post("/v1/vision", json={"image": _tiny_jpeg_data_url()})

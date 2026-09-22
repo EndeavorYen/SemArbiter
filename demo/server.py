@@ -1132,17 +1132,17 @@ class _LatestVisionSlot:
             return True, dict(self._last) if isinstance(self._last, dict) else None
 
     def run_until_idle(self, infer) -> tuple[Dict[str, Any], float]:
+        """Infer the frame that started this cycle, then at most the newest one."""
+        caught_up = False
         evidence: Dict[str, Any] = {}
         encode_ms = 0.0
         while True:
             with self._lock:
                 image = self._image
                 gen = self._gen
-            if image is None:
+            if not image:
                 with self._lock:
                     self._running = False
-                    if isinstance(self._last, dict):
-                        return dict(self._last), encode_ms
                 raise RuntimeError("vision slot had no frame")
             t0 = time.perf_counter()
             try:
@@ -1150,16 +1150,18 @@ class _LatestVisionSlot:
             except Exception:
                 with self._lock:
                     superseded = self._gen != gen
-                    if not superseded:
+                    if (not superseded) or caught_up:
                         self._running = False
-                if superseded:
+                if superseded and not caught_up:
+                    caught_up = True
                     continue
                 raise
             encode_ms = (time.perf_counter() - t0) * 1000.0
             with self._lock:
                 if isinstance(evidence, dict):
                     self._last = evidence
-                if self._gen != gen:
+                if self._gen != gen and not caught_up:
+                    caught_up = True
                     continue
                 self._running = False
                 return evidence, encode_ms

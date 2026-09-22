@@ -472,6 +472,13 @@ if (spec.cmd === "dom") {
   const frames = spec.frames || 120;
   const dt = 1000 / 60;
   const ticks = [];
+  let renders = 0;
+  const renderer = window.SEMIF_WORLD.renderer;
+  const paint = renderer.render;
+  renderer.render = function () {
+    renders += 1;
+    return paint.apply(this, arguments);
+  };
   nowMs = 0;
   for (let i = 0; i < frames; i++) {
     nowMs += dt;
@@ -484,6 +491,7 @@ if (spec.cmd === "dom") {
     tickTimes: ticks,
     intervals: visionIntervals,
     fps: fps.textContent,
+    renders,
   }));
 } else if (spec.cmd === "vision-ack") {
   canvas.toDataURL = () => "data:image/jpeg;base64,ONBOARD";
@@ -602,6 +610,7 @@ def test_each_display_frame_posts_onboard_jpeg():
     """Live tick posts one /v1/vision JPEG per painted onboard frame."""
     pumped = _run({"cmd": "upload", "vision": "1", "frames": 120})
     assert pumped["posts"] == 120
+    assert pumped["renders"] == 120
     assert pumped["postTimes"] == pumped["tickTimes"]
     assert 700 not in pumped["intervals"]
     assert pumped["fps"] == "60 FPS"
