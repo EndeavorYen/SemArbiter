@@ -657,10 +657,12 @@ if (spec.cmd === "dom") {
   window.SEMIF_WORLD = {};
   window.__raf();
   sim.step(0.016);
+  const end = player.route.points[player.route.points.length - 1];
   process.stdout.write(JSON.stringify({
     complete: sim.complete,
     chained: sim.chained,
     target: player.target,
+    endZ: end.z,
   }));
 } else {
   throw new Error("unknown cmd");
@@ -698,10 +700,11 @@ def _run(cmd: dict, view: list[float] | None = None) -> dict:
 
 
 def test_lap_query_stops_at_the_route_end():
-    """?lap=1 marks complete before the sim chains another destination."""
+    """?lap=1 keeps the finished route and sets complete after the sim chains."""
     lap = _run({"cmd": "lap", "vision": "1", "lap": "1"})
     assert lap["complete"] is True
-    assert lap["chained"] is False
+    assert lap["chained"] is True
+    assert lap["endZ"] == 0
     assert lap["target"] == 0
 
 

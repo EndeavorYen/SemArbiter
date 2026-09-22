@@ -557,16 +557,35 @@
     return true;
   }
 
-  function holdLapEnd(sim) {
-    if (!lapOnce || sim.complete || sim.freeExplore) return;
-    const player = sim.player;
+  function routeEnd(player) {
     const points = player && player.route && player.route.points;
-    if (!player || !points || !points.length) return;
-    const end = points[points.length - 1];
-    const dist = Math.hypot(player.x - end.x, player.z - end.z);
-    if (dist < 3 && Math.abs(player.speed) < 1) {
-      sim.complete = true;
+    if (!points || !points.length) return null;
+    return points[points.length - 1];
+  }
+
+  function lapSnapshot(sim) {
+    if (!lapOnce || sim.complete || sim.freeExplore || sim.crash) return null;
+    const player = sim.player;
+    const end = routeEnd(player);
+    if (!player || !end) return null;
+    return {
+      route: player.route,
+      end,
+      dist: Math.hypot(player.x - end.x, player.z - end.z),
+      speed: player.speed,
+    };
+  }
+
+  function finishLap(sim, before) {
+    if (!before || sim.crash) return;
+    const player = sim.player;
+    const end = routeEnd(player);
+    const changed = !end || end !== before.end || player.route !== before.route;
+    if (before.dist < 3 && Math.abs(before.speed) < 1 && changed) {
+      player.route = before.route;
       player.target = 0;
+      player.speed = 0;
+      sim.complete = true;
     }
   }
 
@@ -585,17 +604,18 @@
           } catch (_err) {
             /* PD must not kill the drive loop */
           }
-          try {
-            holdLapEnd(sim);
-          } catch (_err) {
-            /* A finished lap must not kill the drive loop */
-          }
+          const lapBefore = lapSnapshot(sim);
           let out;
           try {
             out = orig(dt);
           } catch (err) {
             console.warn("semif: sim.step", err);
             return out;
+          }
+          try {
+            finishLap(sim, lapBefore);
+          } catch (_err) {
+            /* A finished lap must not kill the drive loop */
           }
           try {
             injectFrustumEvents(sim, Math.min(dt || 0.016, 0.05));
