@@ -634,6 +634,7 @@ if (spec.cmd === "dom") {
     z: 0,
     speed: 2,
     target: 4,
+    s: 100,
     route: { points: [{ x: 0, z: 0 }, { x: 10, z: 0 }] },
   };
   const sim = {
@@ -650,6 +651,7 @@ if (spec.cmd === "dom") {
       const dist = Math.hypot(player.x - last.x, player.z - last.z);
       if (!sim.complete && dist < 3 && player.speed < 1) {
         player.route = { points: [{ x: 0, z: 80 }] };
+        player.s = 2;
         sim.complete = false;
         sim.chained = true;
       }
@@ -665,6 +667,7 @@ if (spec.cmd === "dom") {
     chained: sim.chained,
     target: player.target,
     endZ: end.z,
+    s: player.s,
   }));
 } else {
   throw new Error("unknown cmd");
@@ -708,6 +711,7 @@ def test_lap_query_stops_at_the_route_end():
     assert lap["chained"] is True
     assert lap["endZ"] == 0
     assert lap["target"] == 0
+    assert lap["s"] == 100
 
 
 def test_pip_shell_is_in_the_loaded_overlay():

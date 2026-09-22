@@ -571,6 +571,7 @@
     return {
       route: player.route,
       end,
+      s: player.s,
       dist: Math.hypot(player.x - end.x, player.z - end.z),
       speed: player.speed,
     };
@@ -585,6 +586,7 @@
     const dist = Math.hypot(player.x - before.end.x, player.z - before.end.z);
     if (changed && dist < 3 && player.speed < 1) {
       player.route = before.route;
+      player.s = before.s;
       player.target = 0;
       player.speed = 0;
       sim.complete = true;
