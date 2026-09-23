@@ -22,10 +22,13 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
-# Add repository root to pythonpath
+# Script launch puts demo/ on sys.path. The core package is under src/.
+# The driving app is the repo-root package and is not installed with the core.
 REPO_ROOT = Path(__file__).resolve().parent.parent
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT / "src"))
+for _entry in (REPO_ROOT, REPO_ROOT / "src"):
+    _entry_s = str(_entry)
+    if _entry_s not in sys.path:
+        sys.path.insert(0, _entry_s)
 
 from semif_phase1.action_tree import sensors_corrupt, walk_action_tree
 from semif_phase1.core import LETTERS, apply_prior_calibration, null_prompt_row, softmax
@@ -157,8 +160,6 @@ class DecisionEngine:
         self.tokenizer = None
         self.device = None
         self.graph_runner = None
-        self._vis_proj = None
-        self._vis_null_priors: Dict[int, List[float]] = {}
         self.prior_logits: List[float] = DEFAULT_5OPT_PRIOR
         self.priors_by_n: Dict[int, List[float]] = {len(DEFAULT_5OPT_PRIOR): list(DEFAULT_5OPT_PRIOR)}
         self.stats = {
@@ -244,56 +245,6 @@ class DecisionEngine:
             return logits
         except Exception as e:
             logger.warning(f"Failed to calibrate {n}-option null prior: {e}")
-            return None
-
-    def _visual_prefix_from_state(self, state: Any):
-        from semif_phase1.visual_prefix import VisualPrefixProjector, uses_visual_prefix
-        from jevpilot_vision.vision import get_vision_encoder
-
-        vision = state.get("vision") if isinstance(state, dict) else None
-        if not uses_visual_prefix(vision):
-            return None
-        encoder = get_vision_encoder()
-        patches = encoder.last_patches
-        if patches is None:
-            return None
-        hidden = int(self.model.config.hidden_size)
-        in_dim = int(patches.shape[-1])
-        device = next(self.model.parameters()).device
-        dtype = next(self.model.parameters()).dtype
-        if self._vis_proj is None or self._vis_proj.in_dim != in_dim or self._vis_proj.out_dim != hidden:
-            self._vis_proj = VisualPrefixProjector(in_dim, hidden, device, dtype)
-        return self._vis_proj(patches)
-
-    def _visual_null_prior(self, n: int, row: Dict[str, Any]) -> Optional[List[float]]:
-        cached = self._vis_null_priors.get(n)
-        if cached is not None and len(cached) == n:
-            return cached
-        from jevpilot_vision.vision import get_vision_encoder
-
-        encoder = get_vision_encoder()
-        blank = encoder.null_patches()
-        if blank is None or self._vis_proj is None:
-            return None
-        prefix = self._vis_proj(blank)
-        try:
-            res = score(
-                self.model,
-                self.tokenizer,
-                null_prompt_row(options_count=n),
-                {},
-                sliced_head=True,
-                prior_logits=None,
-                graph_runner=None,
-                visual_prefix=prefix,
-            )
-            logits = list(res["option_logits"])
-            if len(logits) != n:
-                return None
-            self._vis_null_priors[n] = logits
-            return logits
-        except Exception as exc:
-            logger.warning(f"Visual null prior failed: {exc}")
             return None
 
     def build_driving_row(self, telemetry: Dict[str, Any]) -> Dict[str, Any]:

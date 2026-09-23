@@ -721,6 +721,37 @@ def test_driving_loop_prepares_then_calls_live_classifier(monkeypatch):
         server_module.engine = previous
 
 
+def test_server_script_mounts_jevpilot_without_repo_root_on_path():
+    """python demo/server.py must see jevpilot_vision even when only demo/ is on sys.path."""
+    import os
+    import subprocess
+    import sys
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = ""
+    env.pop("PYTHONSAFEPATH", None)
+    code = f"""
+import sys
+from pathlib import Path
+root = Path(r"{REPO_ROOT}")
+sys.path = [p for p in sys.path if Path(p or ".").resolve() not in {{root, root / "src"}}]
+sys.path.insert(0, str(root / "demo"))
+import runpy
+ns = runpy.run_path(str(root / "demo" / "server.py"), run_name="server_script")
+assert ns.get("mount_jevpilot") is not None
+paths = [getattr(route, "path", None) for route in ns["app"].routes]
+assert "/v1/vision" in paths, paths
+"""
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=str(REPO_ROOT / "demo"),
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
 def test_readme_names_jevpilot_as_an_application_in_this_repo():
     text = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     assert "JevPilot-Vision 是此倉中的應用" in text
