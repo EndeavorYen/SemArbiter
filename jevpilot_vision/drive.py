@@ -127,6 +127,15 @@ def prepare_drive_request(payload: Dict[str, Any]) -> Dict[str, Any]:
     return prepared
 
 
+def score_drive_request(engine: Any, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Prepare a driving payload, score it on the live classifier, then apply the veto."""
+    if has_six_column_candidates(payload.get("state")):
+        prepared = prepare_drive_request(payload)
+        result = engine.classify_jev(prepared)
+        return finish_drive_choice(payload, result)
+    return engine.classify_jev(payload)
+
+
 def finish_drive_choice(original: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
     """Physics veto after the live scorer. Collision never wins. A red-light halt replaces the id."""
     state = original.get("state") if isinstance(original.get("state"), dict) else {}

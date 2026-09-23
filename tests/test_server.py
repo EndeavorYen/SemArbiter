@@ -641,6 +641,44 @@ def test_classifier_routes_reject_image_bytes(mock_engine, monkeypatch):
         server_module.engine = previous
 
 
+def test_six_column_request_fails_when_drive_package_is_missing(mock_engine, monkeypatch):
+    import builtins
+
+    import demo.server as server_module
+
+    real_import = builtins.__import__
+
+    def guard(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "jevpilot_vision.drive":
+            raise ModuleNotFoundError(name)
+        return real_import(name, globals, locals, fromlist, level)
+
+    sys.modules.pop("jevpilot_vision.drive", None)
+    monkeypatch.setattr(builtins, "__import__", guard)
+    payload = {
+        "state": {
+            "candidates": {
+                "v_halt": [0.0, 0.0, 0.0, 0.0, False, True],
+                "v_hit": [5.0, 0.0, 0.0, 0.0, True, False],
+            }
+        },
+        "questions": {
+            "vector": {
+                "instructions": "Select path.",
+                "criteria": {"v_halt": "halt", "v_hit": "hit"},
+            }
+        },
+    }
+    previous = server_module.engine
+    server_module.engine = mock_engine
+    try:
+        response = TestClient(app).post("/v1/classifier", json=payload)
+        assert response.status_code == 500, response.text
+        assert "answers" not in response.json()
+    finally:
+        server_module.engine = previous
+
+
 def test_root_is_not_the_driving_homepage():
     client = TestClient(app)
     response = client.get("/")

@@ -980,21 +980,14 @@ def _six_column_candidates(payload: Dict[str, Any]) -> bool:
 async def classifier_endpoint(payload: Dict[str, Any]):
     if _payload_image(payload):
         raise HTTPException(status_code=422, detail="image is not accepted")
-    prepared = payload
-    finish = None
     if _six_column_candidates(payload):
         try:
-            from jevpilot_vision.drive import finish_drive_choice, prepare_drive_request
+            from jevpilot_vision.drive import score_drive_request
         except ModuleNotFoundError:
-            prepare_drive_request = None
-            finish_drive_choice = None
-        if prepare_drive_request is not None and finish_drive_choice is not None:
-            prepared = prepare_drive_request(payload)
-            finish = finish_drive_choice
-    result = get_engine().classify_jev(prepared)
-    if finish is not None:
-        result = finish(payload, result)
-    return result
+            logger.warning("jevpilot_vision is missing; refusing a six-column driving request")
+            raise HTTPException(status_code=500, detail="driving package is not available")
+        return score_drive_request(get_engine(), payload)
+    return get_engine().classify_jev(payload)
 
 
 @app.post("/decide")

@@ -496,7 +496,9 @@ def run_jevpilot2_episode(
             }
 
             t0 = time.perf_counter()
-            resp = engine.classify_jev(req)
+            from jevpilot_vision.drive import score_drive_request
+
+            resp = score_drive_request(engine, req)
             lat_ms = (time.perf_counter() - t0) * 1000.0
             latencies.append(lat_ms)
 
