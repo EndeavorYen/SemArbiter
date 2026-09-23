@@ -1,4 +1,4 @@
-from semif_phase1.directive import fail_safe_choice, plan_directive
+from jevpilot_vision.directive import fail_safe_choice, plan_directive
 
 
 def test_plan_directive_never_returns_a_trajectory_id():

@@ -8,30 +8,26 @@ and Helmholtz Free Energy OOD detection.
 from __future__ import annotations
 
 import argparse
-import asyncio
 import json
 import logging
 import math
 import os
 import sys
-import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse
 
 # Add repository root to pythonpath
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from semif_phase1.action_tree import Branch, Leaf, Node, sensors_corrupt, walk_action_tree
-from semif_phase1.trajectory_sampler import compact_jev_state, partition_ids, vector_option_tag
+from semif_phase1.action_tree import sensors_corrupt, walk_action_tree
 from semif_phase1.core import LETTERS, apply_prior_calibration, null_prompt_row, softmax
 from semif_phase1.direct import score
 from semif_phase1.gating import compute_free_energy, gate_decision
@@ -62,55 +58,6 @@ MANEUVERS = [
 ]
 MANEUVER_IDS = [m["id"] for m in MANEUVERS]
 MANEUVER_BY_ID = {m["id"]: m for m in MANEUVERS}
-
-def build_drive_tree(candidates: Dict[str, Any], meta: Optional[Dict[str, Any]] = None) -> Node:
-    """Bucket this frame's sampled trajectories. Leaves are sampled ids."""
-    halt, lateral, lane = partition_ids(candidates, meta)
-    if not lane:
-        lane = list(candidates.keys()) or ["t00"]
-    slow_ids = tuple(halt) if halt else tuple(lane)
-    lat_ids = tuple(lateral) if lateral else tuple(lane)
-    lane_ids = tuple(lane)
-    speed_node = Node(
-        id="speed",
-        question="Is current speed above the posted ceiling? Choose slow only if speed_mps > speed_ceiling_mps.",
-        evidence_keys=("speed_mps", "speed_ceiling_mps"),
-        skip_if_empty=False,
-        default_branch="cruise",
-        branches=(
-            Branch("slow", "speed_mps is greater than speed_ceiling_mps.", Leaf(slow_ids)),
-            Branch("cruise", "speed_mps is at or under the posted ceiling.", Leaf(lane_ids)),
-        ),
-    )
-    around_node = Node(
-        id="around",
-        question="Is a lateral move required? Choose go_around only for a detour, parked hazard, or emergency vehicle.",
-        evidence_keys=("construction", "roadside_obstacle", "emergency_vehicle"),
-        skip_if_empty=True,
-        default_branch="stay_in_lane",
-        branches=(
-            Branch("go_around", "A detour, parked hazard, or siren requires moving aside.", Leaf(lat_ids)),
-            Branch("stay_in_lane", "No blockage requiring a lateral move.", speed_node),
-        ),
-    )
-    halt_next: Any = Leaf(tuple(halt)) if halt else around_node
-    return Node(
-        id="halt",
-        question="Must the vehicle halt now? Choose must_stop only for a red or yellow signal not yet cleared, a person in the path, or an unmarked yield.",
-        evidence_keys=("intersection", "pedestrian", "other_vehicle"),
-        skip_if_empty=True,
-        default_branch="keep_moving",
-        branches=(
-            Branch("must_stop", "Red or yellow signal, a person in the path, or an unmarked yield.", halt_next),
-            Branch("keep_moving", "No halt required for a signal or a person.", around_node),
-        ),
-    )
-
-
-DRIVE_TREE = build_drive_tree(
-    {"t00": [10.0, 0.0, 0.0, 0.0, False, False], "t01": [0.0, 0.0, 0.0, 0.0, False, True]},
-    {"t01": {"end_speed": 0.0, "steer": 0.0, "stop_at_line": True}},
-)
 
 INTENT_TO_MANEUVER = {
     "OOD_FAIL_SAFE": "fail_safe",
@@ -301,7 +248,7 @@ class DecisionEngine:
 
     def _visual_prefix_from_state(self, state: Any):
         from semif_phase1.visual_prefix import VisualPrefixProjector, uses_visual_prefix
-        from semif_phase1.vision import get_vision_encoder
+        from jevpilot_vision.vision import get_vision_encoder
 
         vision = state.get("vision") if isinstance(state, dict) else None
         if not uses_visual_prefix(vision):
@@ -322,7 +269,7 @@ class DecisionEngine:
         cached = self._vis_null_priors.get(n)
         if cached is not None and len(cached) == n:
             return cached
-        from semif_phase1.vision import get_vision_encoder
+        from jevpilot_vision.vision import get_vision_encoder
 
         encoder = get_vision_encoder()
         blank = encoder.null_patches()
@@ -680,19 +627,14 @@ class DecisionEngine:
             "question": instructions,
             "options": options,
         }
-        visual_prefix = self._visual_prefix_from_state(state)
-        vis_prior = None
-        if visual_prefix is not None:
-            vis_prior = self._visual_null_prior(len(options), row)
         scored = score(
             self.model,
             self.tokenizer,
             row,
             {},
             sliced_head=True,
-            prior_logits=vis_prior if vis_prior is not None else prior,
-            graph_runner=None if visual_prefix is not None else self.graph_runner,
-            visual_prefix=visual_prefix,
+            prior_logits=prior,
+            graph_runner=self.graph_runner,
         )
         from semif_phase1.gating import compute_free_energy
 
@@ -787,6 +729,8 @@ class DecisionEngine:
             return action_ids[0] if action_ids else (all_ids[0] if all_ids else "t00")
 
         meta = state.get("candidate_meta") if isinstance(state, dict) else None
+        from jevpilot_vision.drive import build_drive_tree
+
         tree = build_drive_tree(candidates, meta if isinstance(meta, dict) else None)
         walked = walk_action_tree(tree, state, score_branches, ignore_leaves)
         return {
@@ -815,18 +759,6 @@ class DecisionEngine:
             # Retired as a JevPilot executor. Same full-set scoring as flat.
             mode = "flat"
         raw_mode = bool(payload.get("raw_mode") or (isinstance(state, dict) and state.get("raw_mode")))
-        image = payload.get("image")
-        if not image and isinstance(state, dict):
-            image = state.get("image")
-        if isinstance(image, str) and len(image) > 64:
-            try:
-                from semif_phase1.vision import get_vision_encoder
-
-                vis = get_vision_encoder().infer_b64(image)
-                state = dict(state) if isinstance(state, dict) else {}
-                state["vision"] = vis
-            except Exception as exc:
-                logger.warning("vision encode skipped: %s", exc)
         answers: Dict[str, Any] = {}
         total_input_tokens = 0
 
@@ -861,12 +793,8 @@ class DecisionEngine:
                 "probabilities": self._mock_probs(["explain"], "explain"),
             }
 
-        from semif_phase1.directive import fail_safe_choice, plan_directive
-
         if not isinstance(state, dict):
             state = {}
-        directive = plan_directive(state.get("vision"), state.get("intersection"))
-        state = {**state, "directive": directive["intent"]}
 
         visual_meta: Dict[str, Any] = {}
         for q_key, q_data in questions.items():
@@ -964,34 +892,13 @@ class DecisionEngine:
                 total_input_tokens += 120
             else:
                 use_prior = self._prior_for(len(options))
-                final_instructions = instructions
-                if q_key == "vector" and directive.get("intent"):
-                    final_instructions = f"{instructions} Intent: {directive['intent']}."
-                ego_x = None
-                try:
-                    if state.get("lateral_offset_m") is not None:
-                        ego_x = float(state.get("lateral_offset_m"))
-                        if abs(ego_x) > 8.0:
-                            ego_x = None
-                except (TypeError, ValueError):
-                    ego_x = None
-                vis = state.get("vision") if isinstance(state.get("vision"), dict) else {}
-                inter = state.get("intersection") if isinstance(state.get("intersection"), dict) else {}
-                sig = str(vis.get("signal") or inter.get("signal") or "").lower() or None
-                if sig != "red" and "red" in str(vis.get("event") or "").lower():
-                    sig = "red"
-                final_options = []
-                for opt in options:
-                    cand_vec = candidates.get(opt["id"]) if isinstance(candidates, dict) else None
-                    if cand_vec and len(cand_vec) >= 6:
-                        desc = vector_option_tag(cand_vec, ego_x=ego_x, signal=sig)
-                    else:
-                        desc = opt["description"]
-                    final_options.append({"id": opt["id"], "description": desc})
+                prompt_state = state
+                if isinstance(state.get("_semif_prompt_state"), dict):
+                    prompt_state = state["_semif_prompt_state"]
                 neural_vec = self._score_neural_options(
-                    compact_jev_state(state),
-                    final_instructions,
-                    final_options,
+                    prompt_state,
+                    instructions,
+                    options,
                     use_prior,
                 )
                 total_input_tokens += neural_vec["input_tokens"]
@@ -1005,15 +912,6 @@ class DecisionEngine:
                 }
 
         self.stats["total_decisions"] += 1
-
-        candidates_now = state.get("candidates") if isinstance(state.get("candidates"), dict) else {}
-        if "vector" in answers and candidates_now:
-            raw_choice = answers["vector"].get("choice")
-            legal = None if raw_mode or mode == "heuristic" else directive
-            safe = fail_safe_choice(candidates_now, raw_choice, legal)
-            if safe and safe != raw_choice:
-                answers["vector"]["choice"] = safe
-                visual_meta["fail_safe"] = True
 
         classifier_ms = (time.perf_counter() - t0) * 1000.0
         return {
@@ -1041,7 +939,7 @@ class DecisionEngine:
                 "seed": (state.get("seed") if isinstance(state, dict) else None),
                 "visual_prefix_tokens": visual_meta.get("visual_prefix_tokens", 0),
                 "vision_free_energy": visual_meta.get("vision_free_energy"),
-                "jev1_intent": directive.get("intent"),
+                "jev1_intent": state.get("directive") if isinstance(state, dict) else None,
                 "fail_safe": bool(visual_meta.get("fail_safe")),
                 "classifier_ms": classifier_ms,
             },
@@ -1106,106 +1004,46 @@ async def health_check():
     }
 
 
+def _payload_image(payload: Dict[str, Any]) -> Optional[str]:
+    image = payload.get("image")
+    state = payload.get("state")
+    if not image and isinstance(state, dict):
+        image = state.get("image")
+    if isinstance(image, str) and image:
+        return image
+    return None
+
+
+def _six_column_candidates(payload: Dict[str, Any]) -> bool:
+    state = payload.get("state")
+    if not isinstance(state, dict):
+        return False
+    candidates = state.get("candidates")
+    if not isinstance(candidates, dict) or not candidates:
+        return False
+    return any(isinstance(vec, (list, tuple)) and len(vec) >= 6 for vec in candidates.values())
+
+
 @app.post("/v1/classifier")
 @app.post("/v1/systemone")
 async def classifier_endpoint(payload: Dict[str, Any]):
-    return get_engine().classify_jev(payload)
-
-
-class _LatestVisionSlot:
-    """One JPEG slot. A busy worker finishes, then infers whatever is newest."""
-
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._image: Optional[str] = None
-        self._gen = 0
-        self._running = False
-        self._last: Optional[Dict[str, Any]] = None
-        self._last_gen: Optional[int] = None
-
-    def submit(self, image: str) -> tuple[bool, Optional[Dict[str, Any]], Optional[int]]:
-        with self._lock:
-            self._gen += 1
-            self._image = image
-            last = dict(self._last) if isinstance(self._last, dict) else None
-            last_gen = self._last_gen
-            if self._running:
-                return False, last, last_gen
-            self._running = True
-            return True, last, last_gen
-
-    def run_until_idle(self, infer) -> tuple[Dict[str, Any], float, int]:
-        """Infer the frame that started this cycle, then at most the newest one."""
-        caught_up = False
-        evidence: Dict[str, Any] = {}
-        encode_ms = 0.0
-        while True:
-            with self._lock:
-                image = self._image
-                gen = self._gen
-            if not image:
-                with self._lock:
-                    self._running = False
-                raise RuntimeError("vision slot had no frame")
-            t0 = time.perf_counter()
-            try:
-                evidence = infer(image)
-            except Exception:
-                with self._lock:
-                    superseded = self._gen != gen
-                    if (not superseded) or caught_up:
-                        self._running = False
-                if superseded and not caught_up:
-                    caught_up = True
-                    continue
-                raise
-            encode_ms = (time.perf_counter() - t0) * 1000.0
-            with self._lock:
-                if isinstance(evidence, dict):
-                    self._last = evidence
-                    self._last_gen = gen
-                if self._gen != gen and not caught_up:
-                    caught_up = True
-                    continue
-                self._running = False
-                return evidence, encode_ms, gen
-
-
-_vision_slot = _LatestVisionSlot()
-
-
-def reset_vision_slot() -> None:
-    global _vision_slot
-    _vision_slot = _LatestVisionSlot()
-
-
-def _infer_latest_jpeg(image_b64: str) -> Dict[str, Any]:
-    from semif_phase1.vision import get_vision_encoder
-
-    return get_vision_encoder().infer_b64(image_b64)
-
-
-@app.post("/v1/vision")
-async def vision_endpoint(payload: Dict[str, Any]):
-    image = payload.get("image") or payload.get("image_base64")
-    if not isinstance(image, str) or len(image) < 64:
-        return {"error": "image (data URL or base64) required"}
-    start, last, last_gen = _vision_slot.submit(image)
-    if not start:
-        body: Dict[str, Any] = {}
-        if isinstance(last, dict):
-            body["vision"] = last
-            if isinstance(last_gen, int):
-                body["vision_gen"] = last_gen
-        return body
-    evidence, vision_encode_ms, vision_gen = await asyncio.to_thread(
-        _vision_slot.run_until_idle, _infer_latest_jpeg
-    )
-    return {
-        "vision": evidence,
-        "vision_encode_ms": vision_encode_ms,
-        "vision_gen": vision_gen,
-    }
+    if _payload_image(payload):
+        raise HTTPException(status_code=422, detail="image is not accepted")
+    prepared = payload
+    finish = None
+    if _six_column_candidates(payload):
+        try:
+            from jevpilot_vision.drive import finish_drive_choice, prepare_drive_request
+        except ModuleNotFoundError:
+            prepare_drive_request = None
+            finish_drive_choice = None
+        if prepare_drive_request is not None and finish_drive_choice is not None:
+            prepared = prepare_drive_request(payload)
+            finish = finish_drive_choice
+    result = get_engine().classify_jev(prepared)
+    if finish is not None:
+        result = finish(payload, result)
+    return result
 
 
 @app.post("/decide")
@@ -1241,17 +1079,16 @@ async def websocket_stream_decide(websocket: WebSocket):
         logger.error(f"WebSocket exception: {e}")
 
 
-# Mount static assets for Three.js demo
-jevpilot_dir = REPO_ROOT / "demo" / "jevpilot"
-if jevpilot_dir.exists():
-    app.mount("/jevpilot", StaticFiles(directory=str(jevpilot_dir), html=True), name="jevpilot")
+try:
+    from jevpilot_vision.http import mount as mount_jevpilot
+except ModuleNotFoundError:
+    mount_jevpilot = None
+if mount_jevpilot is not None:
+    mount_jevpilot(app)
 
 
 @app.get("/")
 async def root():
-    index_file = jevpilot_dir / "index.html"
-    if index_file.exists():
-        return FileResponse(index_file)
     return HTMLResponse("<h1>SemIf Decision Server Online</h1><p>Visit /health or /jevpilot/</p>")
 
 

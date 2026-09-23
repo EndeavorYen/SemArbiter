@@ -1,4 +1,4 @@
-from semif_phase1.stall import STALL_HOLD_S, stall_update
+from jevpilot_vision.stall import STALL_HOLD_S, stall_update
 
 
 def test_moving_car_does_not_stall():
@@ -51,7 +51,7 @@ def test_stopped_three_seconds_triggers_once_then_cooldown():
 
 
 def test_overlay_replan_is_ego_only_no_forced_reverse():
-    js = open("demo/jevpilot/semif-layer.js", encoding="utf-8").read()
+    js = open("jevpilot_vision/web/semif-layer.js", encoding="utf-8").read()
     assert "requestEgoReplan" in js
     assert "STALL_HOLD_S = 3.0" in js
     assert "p.target = -4" not in js

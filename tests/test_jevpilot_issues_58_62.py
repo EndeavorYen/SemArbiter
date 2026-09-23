@@ -18,7 +18,7 @@ from demo.server import MANEUVER_IDS, DecisionEngine, coarse_maneuver, rule_mane
 
 
 REPO = Path(__file__).resolve().parent.parent
-JEV = REPO / "demo" / "jevpilot"
+JEV = REPO / "jevpilot_vision" / "web"
 
 
 @pytest.fixture(scope="module")
@@ -148,7 +148,7 @@ def test_bundle_hooks_raw_mode_and_sim():
 
 
 def test_semantic_exclusive_intents(engine):
-    from semif_phase1.trajectory_sampler import partition_ids
+    from jevpilot_vision.trajectory_sampler import partition_ids
     cases = [
         ("ambiguous_priority", "halt", 20.0, False),
         ("construction_detour", "lateral", 18.0, False),

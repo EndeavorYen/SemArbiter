@@ -1,7 +1,7 @@
 """Keep the default Jev letter-slot prompt inside the 512 CUDA Graph bucket (#86)."""
 
 from semif_phase1.core import direct_messages
-from semif_phase1.trajectory_sampler import VECTOR_INSTRUCTIONS, compact_jev_state, vector_option_tag
+from jevpilot_vision.trajectory_sampler import VECTOR_INSTRUCTIONS, compact_jev_state, vector_option_tag
 
 GRAPH_BUCKET = 512
 # Qwen English JSON is typically ~3.5–4 characters per token. Stay under 4× bucket.

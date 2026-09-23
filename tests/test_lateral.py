@@ -4,8 +4,8 @@ import math
 import re
 from pathlib import Path
 
-from semif_phase1 import lateral as lat
-from semif_phase1.lateral import (
+from jevpilot_vision import lateral as lat
+from jevpilot_vision.lateral import (
     LANE_KEEP_OFFSET_M,
     LATERAL_KD,
     LATERAL_KP,
@@ -21,7 +21,7 @@ from semif_phase1.lateral import (
     signed_lane_offset,
 )
 
-OVERLAY_JS = Path("demo/jevpilot/semif-layer.js")
+OVERLAY_JS = Path("jevpilot_vision/web/semif-layer.js")
 CONTROL_CONSTS = (
     "LANE_KEEP_OFFSET_M",
     "LOOKAHEAD_MIN_M",

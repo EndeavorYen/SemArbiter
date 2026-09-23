@@ -1,6 +1,6 @@
 # 教程 10：Jev 與傳統分類器——輸入／輸出維度，以及為何 JevPilot 拿掉 Hierarchical
 
-> **模組對應**：`src/semif_phase1/trajectory_sampler.py`、`src/semif_phase1/action_tree.py`、`demo/server.py`、`benchmarks/driving_quality.py`  
+> **模組對應**：`jevpilot_vision/trajectory_sampler.py`、`src/semif_phase1/action_tree.py`、`demo/server.py`、`benchmarks/driving_quality.py`  
 > **關聯任務**：[ #80 移除 JevPilot Hierarchical](https://github.com/EndeavorYen/SemIf/issues/80)、[ #79 樹只解釋不刪軌](https://github.com/EndeavorYen/SemIf/issues/79)、[ #71 動態採樣](https://github.com/EndeavorYen/SemIf/issues/71)  
 > **前置知識**：[教程 02：決策原生 vs 因果 LM](02_decision_native_vs_causal_lm.md)、[教程 06：LM Head 投影優化](06_transformer_lm_head_optimization.md)、[教程 09：動態候選與語意仲裁](09_dynamic_candidates_and_arbitration.md)
 

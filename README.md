@@ -11,7 +11,7 @@
 
 **次世代語意仲裁與具身決策運行時 (Next-Generation Semantic Arbiter & Decision Runtime)**  
 *針對開源基礎模型之語意決策分支，集成「切片輸出頭 (Sliced Head)、CUDA Graphs (5.6ms) / Apple MLX (31.5ms) 雙硬體加速、黃金分割 ECE 統計校準、前綴排列去偏 (翻轉率歸零) 與 Helmholtz 自由能 100% OOD 安全護欄」之全套生產級工程架構。*  
-*以純相機像素與幾何軌跡仲裁驅動的 **JevPilot-Vision 3D 模擬器** 為具身自駕實證，並持續拓展至百人市民 Agent 模擬、AST 程式碼積木構建與雙系統高頻落地。*
+*JevPilot-Vision 是此倉中的應用：車端把畫面收成證據和選項，再交給 SemArbiter 打分。市民模擬與程式積木走同一道門，不經過相機。**
 
 > [!IMPORTANT]
 > **專案血統與定位說明 (Lineage & Attribution)**：
@@ -219,7 +219,7 @@ flowchart TD
 ### 🎯 核心工程突破：拒絕「特權作弊數值」，擁抱「純視覺閉環」
 1. **打破 Privileged Sim Data（上帝視角作弊）**：
    - 原版 JevPilot 直接從遊戲記憶體中讀取物體絕對座標包成 JSON 餵給模型（本質上幾行 if-else 就能完成）。
-   - **JevPilot-Vision 實作純相機像素驅動**：前端 [`demo/jevpilot/semif-layer.js`](demo/jevpilot/semif-layer.js) 定期截取 Canvas 畫面，後端由 [`SigLIP`](https://huggingface.co/google/siglip-base-patch16-224) 提取 32~64 個視覺 Patch Tokens 作為視覺前綴，直接參與候選軌跡的 Sliced Head 決策！
+   - **JevPilot-Vision 實作純相機像素驅動**：前端 [`jevpilot_vision/web/semif-layer.js`](jevpilot_vision/web/semif-layer.js) 定期截取 Canvas 畫面，後端由 [`SigLIP`](https://huggingface.co/google/siglip-base-patch16-224) 提取 32~64 個視覺 Patch Tokens 作為視覺前綴，直接參與候選軌跡的 Sliced Head 決策！
 2. **端到端實測閉環延遲預算表 (E2E Latency Budget ~80ms)**：
    - 前端畫面擷取與壓縮：~15–20 ms
    - SigLIP 視覺前綴與語意打分：~25–35 ms

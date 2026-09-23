@@ -1,6 +1,6 @@
 import inspect
 
-from semif_phase1.trajectory_sampler import (
+from jevpilot_vision.trajectory_sampler import (
     CENTER_ABS_M,
     PLAN_POINTS,
     STEER_LIMIT,
@@ -75,8 +75,8 @@ def test_option_contract_has_no_signal_and_no_stop_coaching():
     assert VECTOR_COLUMNS[-1] == "stop_at_line"
     assert "stop_at_line" not in VECTOR_INSTRUCTIONS
     assert "required" not in VECTOR_INSTRUCTIONS.lower()
-    main = (__import__("pathlib").Path("demo/jevpilot/assets/main-CvLEeHjW.js").read_text(encoding="utf-8"))
-    worker = (__import__("pathlib").Path("demo/jevpilot/assets/planner.worker-DFdG3q6n.js").read_text(encoding="utf-8"))
+    main = (__import__("pathlib").Path("jevpilot_vision/web/assets/main-CvLEeHjW.js").read_text(encoding="utf-8"))
+    worker = (__import__("pathlib").Path("jevpilot_vision/web/assets/planner.worker-DFdG3q6n.js").read_text(encoding="utf-8"))
     assert "When a stop is required" not in main
     assert VECTOR_INSTRUCTIONS in main
     assert "l=!1&&O&&r<8" in worker

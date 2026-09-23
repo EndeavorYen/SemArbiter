@@ -3,9 +3,9 @@
 import random
 from pathlib import Path
 
-from semif_phase1.trajectory_sampler import _speed_fraction, sample_trajectories
+from jevpilot_vision.trajectory_sampler import _speed_fraction, sample_trajectories
 
-JEV = Path(__file__).resolve().parent.parent / "demo" / "jevpilot"
+JEV = Path(__file__).resolve().parent.parent / "jevpilot_vision" / "web"
 
 
 def test_python_index_zero_is_stop_index_five_is_forward_cruise():
