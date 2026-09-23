@@ -1,6 +1,6 @@
 """FSD picture-in-picture frame view (#115).
 
-The node harness loads demo/jevpilot/semif-layer.js and calls the animation
+The node harness loads jevpilot_vision/web/semif-layer.js and calls the animation
 callback that script registers. That is the painter the page runs each frame.
 """
 
@@ -14,8 +14,8 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parents[1]
-OVERLAY_JS = REPO / "demo" / "jevpilot" / "semif-layer.js"
-OVERLAY_CSS = REPO / "demo" / "jevpilot" / "semif-layer.css"
+OVERLAY_JS = REPO / "jevpilot_vision" / "web" / "semif-layer.js"
+OVERLAY_CSS = REPO / "jevpilot_vision" / "web" / "semif-layer.css"
 
 PIP_W = 320
 PIP_H = 180
@@ -721,7 +721,7 @@ def test_pip_shell_is_in_the_loaded_overlay():
     assert dom["canvas"] == {"w": PIP_W, "h": PIP_H}
     assert dom["fps0"] == "-- FPS"
     css = OVERLAY_CSS.read_text(encoding="utf-8")
-    html = (REPO / "demo" / "jevpilot" / "index.html").read_text(encoding="utf-8")
+    html = (REPO / "jevpilot_vision" / "web" / "index.html").read_text(encoding="utf-8")
     assert "preserveDrawingBuffer" in html.split('type="module"')[0]
     assert "#fsd-pip" in css
     assert "pointer-events: auto" in css

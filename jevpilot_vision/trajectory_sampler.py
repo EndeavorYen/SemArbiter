@@ -139,7 +139,7 @@ def vector_option_tag(
     return " ".join(parts)
 
 
-# Planner worker (demo/jevpilot/assets/planner.worker-*.js) policy, 1D track rewrite.
+# Planner worker (jevpilot_vision/web/assets/planner.worker-*.js) policy, 1D track rewrite.
 # Steer is clamped to ±0.85. On-road it draws ~55 samples; we keep 16 for letter-slot.
 # Evaluation uses dt=0.05 and ~31 points (offroad_fraction uses p/31).
 STEER_LIMIT = 0.85

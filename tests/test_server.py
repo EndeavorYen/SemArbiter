@@ -16,7 +16,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from demo.server import DecisionEngine, app, DRIVING_ACTIONS, ACTION_IDS, reset_vision_slot
+from demo.server import DecisionEngine, app, DRIVING_ACTIONS, ACTION_IDS
+from jevpilot_vision.http import reset_vision_slot
 
 
 @pytest.fixture(scope="module")
@@ -377,7 +378,7 @@ def test_v1_vision_overlapping_post_keeps_only_the_latest(mock_engine, monkeypat
             return {"signal": "green", "event": "road clear ahead", "backend": "stub"}
 
     monkeypatch.setattr(
-        "semif_phase1.vision.get_vision_encoder",
+        "jevpilot_vision.vision.get_vision_encoder",
         lambda: _Dummy(),
     )
 
@@ -449,7 +450,7 @@ def test_v1_vision_worker_infers_one_catch_up_then_stops(mock_engine, monkeypatc
                 assert second_go.wait(3)
             return {"signal": "green", "event": "road clear ahead", "backend": "stub"}
 
-    monkeypatch.setattr("semif_phase1.vision.get_vision_encoder", lambda: _Dummy())
+    monkeypatch.setattr("jevpilot_vision.vision.get_vision_encoder", lambda: _Dummy())
 
     async def _scenario():
         transport = httpx.ASGITransport(app=app)
@@ -510,7 +511,7 @@ def test_v1_vision_labels_evidence_with_monotonic_gen(mock_engine, monkeypatch):
         def infer_b64(self, image: str):
             return {"signal": "green", "event": "road clear ahead", "backend": "stub"}
 
-    monkeypatch.setattr("semif_phase1.vision.get_vision_encoder", lambda: _Dummy())
+    monkeypatch.setattr("jevpilot_vision.vision.get_vision_encoder", lambda: _Dummy())
     client = TestClient(app)
     image = _tiny_jpeg_data_url()
     first = client.post("/v1/vision", json={"image": image + "AAA"}).json()
@@ -528,4 +529,270 @@ def test_v1_vision_returns_vision_encode_ms(mock_engine):
     assert isinstance(data["vision_encode_ms"], float)
     assert data["vision_encode_ms"] >= 0.0
     assert "vision" in data
+
+
+def _neural_engine(server_module):
+    engine = DecisionEngine(use_mock=True)
+    engine.use_mock = False
+    engine.model = object()
+    engine.tokenizer = object()
+    previous = server_module.engine
+    server_module.engine = engine
+    return engine, previous
+
+
+def _fake_score_last_option(seen):
+    def fake_score(model, tokenizer, row, *args, **kwargs):
+        seen.append(row)
+        options = row["options"]
+        probs = [0.05] * len(options)
+        probs[-1] = 0.9
+        return {
+            "probabilities": probs,
+            "calibrated_logits": probs,
+            "option_logits": probs,
+            "input_tokens": 4,
+            "visual_prefix_tokens": 0,
+        }
+
+    return fake_score
+
+
+def test_live_routes_score_supplied_option_without_driving_modules(monkeypatch):
+    """Evidence plus options, no JPEG. Wrong option id fails without driving modules."""
+    import inspect
+
+    import demo.server as server_module
+
+    _engine, previous = _neural_engine(server_module)
+    seen = []
+    monkeypatch.setattr(server_module, "score", _fake_score_last_option(seen))
+    sys.modules.pop("jevpilot_vision.vision", None)
+    sys.modules.pop("jevpilot_vision", None)
+    payload = {
+        "state": {"note": "refund window is open"},
+        "questions": {
+            "decision": {
+                "instructions": "Is the refund approved?",
+                "criteria": {"no": "Deny the refund", "yes": "Approve the refund"},
+            }
+        },
+    }
+    try:
+        client = TestClient(app)
+        for path in ("/v1/classifier", "/v1/systemone"):
+            response = client.post(path, json=payload)
+            assert response.status_code == 200, response.text
+            body = response.json()
+            assert body["answers"]["decision"]["choice"] == "yes"
+            assert set(body["answers"]["decision"]["probabilities"]) == {"no", "yes"}
+        scored = [row for row in seen if row.get("question") == "Is the refund approved?"]
+        assert scored
+        assert [opt["id"] for opt in scored[0]["options"]] == ["no", "yes"]
+        assert "jevpilot_vision.vision" not in sys.modules
+        assert "jevpilot_vision" not in sys.modules
+        source = (
+            inspect.getsource(DecisionEngine.classify_jev)
+            + inspect.getsource(DecisionEngine._score_neural_options)
+        )
+        for banned in (
+            "trajectory_sampler",
+            "get_vision_encoder",
+            "VisionEncoder",
+            "jevpilot_vision.vision",
+            "jevpilot_vision.lateral",
+            "jevpilot_vision.ipm",
+        ):
+            assert banned not in source
+    finally:
+        server_module.engine = previous
+
+
+def test_classifier_routes_reject_image_bytes(mock_engine, monkeypatch):
+    import demo.server as server_module
+
+    def boom(*_args, **_kwargs):
+        raise AssertionError("VisionEncoder must not run on the classifier door")
+
+    def scored(*_args, **_kwargs):
+        raise AssertionError("image request must not be scored")
+
+    monkeypatch.setattr("jevpilot_vision.vision.get_vision_encoder", boom, raising=False)
+    monkeypatch.setattr(server_module, "score", scored)
+    previous = server_module.engine
+    image = "data:image/jpeg;base64," + ("A" * 80)
+    questions = {
+        "decision": {
+            "instructions": "Pick one",
+            "criteria": {"a": "Alpha", "b": "Beta"},
+        }
+    }
+    try:
+        client = TestClient(app)
+        for path in ("/v1/classifier", "/v1/systemone"):
+            for payload in (
+                {"image": image, "state": {"note": "text"}, "questions": questions},
+                {"state": {"note": "text", "image": image}, "questions": questions},
+            ):
+                response = client.post(path, json=payload)
+                assert response.status_code == 422, response.text
+                assert "answers" not in response.json()
+    finally:
+        server_module.engine = previous
+
+
+def test_six_column_request_fails_when_drive_package_is_missing(mock_engine, monkeypatch):
+    import builtins
+
+    import demo.server as server_module
+
+    real_import = builtins.__import__
+
+    def guard(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "jevpilot_vision.drive":
+            raise ModuleNotFoundError(name)
+        return real_import(name, globals, locals, fromlist, level)
+
+    sys.modules.pop("jevpilot_vision.drive", None)
+    monkeypatch.setattr(builtins, "__import__", guard)
+    payload = {
+        "state": {
+            "candidates": {
+                "v_halt": [0.0, 0.0, 0.0, 0.0, False, True],
+                "v_hit": [5.0, 0.0, 0.0, 0.0, True, False],
+            }
+        },
+        "questions": {
+            "vector": {
+                "instructions": "Select path.",
+                "criteria": {"v_halt": "halt", "v_hit": "hit"},
+            }
+        },
+    }
+    previous = server_module.engine
+    server_module.engine = mock_engine
+    try:
+        response = TestClient(app).post("/v1/classifier", json=payload)
+        assert response.status_code == 500, response.text
+        assert "answers" not in response.json()
+    finally:
+        server_module.engine = previous
+
+
+def test_root_is_not_the_driving_homepage():
+    client = TestClient(app)
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "SemIf Decision Server Online" in response.text
+    assert "Autonomous Driving Simulator" not in response.text
+
+
+def test_driving_modules_live_outside_the_core_package():
+    core = REPO_ROOT / "src" / "semif_phase1"
+    app_dir = REPO_ROOT / "jevpilot_vision"
+    for name in (
+        "vision.py",
+        "trajectory_sampler.py",
+        "lateral.py",
+        "ipm.py",
+        "stall.py",
+        "directive.py",
+    ):
+        assert not (core / name).exists(), name
+        assert (app_dir / name).exists(), name
+    assert (app_dir / "web" / "index.html").exists()
+    assert not (REPO_ROOT / "demo" / "jevpilot" / "index.html").exists()
+    for path in core.rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        assert "jevpilot_vision" not in text
+
+
+def test_driving_loop_prepares_then_calls_live_classifier(monkeypatch):
+    """Six-column candidates are tagged before classify_jev. The veto stays outside it."""
+    import inspect
+
+    import demo.server as server_module
+
+    source = inspect.getsource(DecisionEngine.classify_jev)
+    assert "fail_safe_choice" not in source
+    assert "compact_jev_state" not in source
+    assert "vector_option_tag" not in source
+    assert "plan_directive" not in source
+
+    _engine, previous = _neural_engine(server_module)
+    seen = []
+    monkeypatch.setattr(server_module, "score", _fake_score_last_option(seen))
+    calls = []
+    original = DecisionEngine.classify_jev
+
+    def wrapped(self, payload):
+        calls.append(payload)
+        return original(self, payload)
+
+    monkeypatch.setattr(DecisionEngine, "classify_jev", wrapped)
+    payload = {
+        "mode": "flat",
+        "state": {
+            "speed_mps": 8.0,
+            "candidates": {
+                "v_halt": [0.0, 0.0, 0.0, 0.0, False, True],
+                "v_hit": [5.0, 0.0, 0.0, 0.0, True, False],
+            },
+        },
+        "questions": {
+            "vector": {
+                "instructions": "Select path.",
+                "criteria": {"v_halt": "halt", "v_hit": "hit"},
+            }
+        },
+    }
+    try:
+        response = TestClient(app).post("/v1/classifier", json=payload)
+        assert response.status_code == 200, response.text
+        assert response.json()["answers"]["vector"]["choice"] == "v_halt"
+        assert calls
+        criteria = calls[0]["questions"]["vector"]["criteria"]
+        assert criteria["v_halt"] == "0.0m/s +0.00 clear halt"
+        assert calls[0]["questions"]["vector"]["instructions"] == "Select path. Intent: CRUISE."
+        assert seen
+    finally:
+        server_module.engine = previous
+
+
+def test_server_script_mounts_jevpilot_without_repo_root_on_path():
+    """python demo/server.py must see jevpilot_vision even when only demo/ is on sys.path."""
+    import os
+    import subprocess
+    import sys
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = ""
+    env.pop("PYTHONSAFEPATH", None)
+    code = f"""
+import sys
+from pathlib import Path
+root = Path(r"{REPO_ROOT}")
+sys.path = [p for p in sys.path if Path(p or ".").resolve() not in {{root, root / "src"}}]
+sys.path.insert(0, str(root / "demo"))
+import runpy
+ns = runpy.run_path(str(root / "demo" / "server.py"), run_name="server_script")
+assert ns.get("mount_jevpilot") is not None
+paths = [getattr(route, "path", None) for route in ns["app"].routes]
+assert "/v1/vision" in paths, paths
+"""
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=str(REPO_ROOT / "demo"),
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_readme_names_jevpilot_as_an_application_in_this_repo():
+    text = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    assert "JevPilot-Vision 是此倉中的應用" in text
+    assert "http://localhost:8000/jevpilot/" in text
+    assert '{"state":' in text or '"state":' in text
 

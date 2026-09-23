@@ -27,7 +27,7 @@ The visual compares output paths, not semantic correctness. See the main [result
 Inspired by [`featherless-ai/simple-jev`](https://github.com/featherless-ai/simple-jev) and `jevpilot`, this interactive demo provides a real-time 3D highway simulation powered by SemIf's sub-15ms semantic decision engine.
 
 ### Highlights
-- **Zero-Build 3D Client** (`demo/jevpilot/index.html`): Pure Three.js from CDN with dynamic cyber highway, procedural road curves, obstacle traffic, and full vehicle dynamics.
+- **Zero-Build 3D Client** (`jevpilot_vision/web/index.html`): Pure Three.js from CDN with dynamic cyber highway, procedural road curves, obstacle traffic, and full vehicle dynamics.
 - **WebSocket Streaming Server** (`demo/server.py`): Real-time `/stream-decide` bi-directional JSON streaming with Qwen2.5-3B-Instruct, Sliced LM Head, and CUDA Graphs.
 - **Three Pilot Modes**:
   1. **Manual [1]**: WASD / Arrow key player control.
@@ -48,7 +48,7 @@ python demo/server.py --model Qwen/Qwen2.5-3B-Instruct --device cuda --port 8000
 # Replay a world: http://localhost:8000/jevpilot/?seed=42
 # Vision HUD (canvas → /v1/vision → state.vision): default on; ?vision=0 to skip
 # Raw decision mode: ?raw=1
-# Or open demo/jevpilot/index.html directly (features automatic offline fallback engine)
+# Or open jevpilot_vision/web/index.html directly (features automatic offline fallback engine)
 ```
 
 Closed-loop mock benchmark with a fixed seed matrix:

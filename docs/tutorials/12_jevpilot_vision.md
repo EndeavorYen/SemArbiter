@@ -1,6 +1,6 @@
 # 教程 12：JevPilot 視覺輸入
 
-> **模組**：`src/semif_phase1/vision.py`、`demo/server.py`（`POST /v1/vision`）、`demo/jevpilot/semif-layer.js`、`benchmarks/benchmark_jevpilot_vision.py`  
+> **模組**：`jevpilot_vision/vision.py`、`demo/server.py`（`POST /v1/vision`）、`jevpilot_vision/web/semif-layer.js`、`benchmarks/benchmark_jevpilot_vision.py`  
 > **Issue**：[ #90](https://github.com/EndeavorYen/SemIf/issues/90) [ #48](https://github.com/EndeavorYen/SemIf/issues/48) 傘 [#89](https://github.com/EndeavorYen/SemIf/issues/89)
 
 視覺認路況，Jev 選本幀軌 `tXX`。不准自由文字轉角。不准因視覺標籤在採樣器裡塞停車軌。

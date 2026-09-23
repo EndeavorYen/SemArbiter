@@ -143,3 +143,79 @@ def test_benchmark_suite_generation(mock_engine, tmp_path):
 
     assert out_file.exists()
     assert set(report["modes"]["flat"]["scenario_breakdown"])
+
+
+def test_closed_loop_episode_vetoes_a_collision_the_model_picks(monkeypatch):
+    """run_jevpilot2_episode must veto a colliding trajectory the scorer selects."""
+    import demo.server as server_module
+
+    engine = DecisionEngine(use_mock=True)
+    engine.use_mock = False
+    engine.model = object()
+    engine.tokenizer = object()
+    scored = []
+
+    def fake_score(_model, _tokenizer, row, *_args, **_kwargs):
+        scored.append(row)
+        options = row["options"]
+        probs = [0.05] * len(options)
+        probs[-1] = 0.9
+        return {
+            "probabilities": probs,
+            "calibrated_logits": probs,
+            "option_logits": probs,
+            "input_tokens": 4,
+            "visual_prefix_tokens": 0,
+        }
+
+    monkeypatch.setattr(server_module, "score", fake_score)
+
+    class _OneStep:
+        def __init__(self, *_args, **_kwargs):
+            self.speed_mps = 5.0
+            self.completed = True
+            self.collision = False
+            self.pedestrian_casualty = False
+            self.vehicle_collision = False
+            self.off_track = False
+            self.red_light_violation = 0
+            self.speeding_violation = 0
+            self.speeding_time_s = 0.0
+            self.fail_safe_triggered = False
+            self.has_anomaly = False
+            self.priority_violation = False
+            self.detour_violation = False
+            self.emergency_violation = False
+            self.jerks = []
+            self.steering_deltas = []
+            self.speeds = [5.0]
+            self.use_camera_obstacles = True
+
+        def get_observation(self):
+            return {
+                "speed_mps": 5.0,
+                "candidates": {
+                    "v_halt": [0.0, 0.0, 0.0, 0.0, False, True],
+                    "v_hit": [5.0, 0.0, 0.0, 0.0, True, False],
+                },
+            }
+
+        def step(self, _vec, _is_ood):
+            return True, {}
+
+    monkeypatch.setattr(
+        "benchmarks.benchmark_jevpilot_hierarchical.JevPilot2Simulator",
+        _OneStep,
+    )
+    chosen = []
+    run_jevpilot2_episode(
+        engine,
+        "flat",
+        "city",
+        1,
+        on_step=lambda _env, chosen_id, _vec, _obs: chosen.append(chosen_id),
+    )
+    assert chosen == ["v_halt"]
+    assert scored
+    assert scored[-1]["question"].endswith("Intent: CRUISE.")
+    assert scored[-1]["options"][-1]["description"] == "5.0m/s +0.00 hit go"

@@ -33,8 +33,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from demo.server import DecisionEngine
-from semif_phase1.lateral import DETOUR_STEER, lateral_pd
-from semif_phase1.trajectory_sampler import (
+from jevpilot_vision.lateral import DETOUR_STEER, lateral_pd
+from jevpilot_vision.trajectory_sampler import (
     VECTOR_INSTRUCTIONS,
     candidates_as_vecs,
     candidates_meta,
@@ -254,8 +254,8 @@ class JevPilot2Simulator:
                 "siren": True,
             }
 
-        from semif_phase1.ipm import camera_obstacles_from_blobs
-        from semif_phase1.vision import blobs_from_frame, render_scenario_frame
+        from jevpilot_vision.ipm import camera_obstacles_from_blobs
+        from jevpilot_vision.vision import blobs_from_frame, render_scenario_frame
 
         if getattr(self, "use_camera_obstacles", True):
             frame = render_scenario_frame(self.scenario_type, self)
@@ -477,7 +477,7 @@ def run_jevpilot2_episode(
         if step_count % decision_interval == 0:
             obs = env.get_observation()
             if vision_mode == "synthetic":
-                from semif_phase1.vision import vision_from_scenario
+                from jevpilot_vision.vision import vision_from_scenario
 
                 obs = dict(obs)
                 obs["vision"] = vision_from_scenario(scenario)
@@ -496,7 +496,9 @@ def run_jevpilot2_episode(
             }
 
             t0 = time.perf_counter()
-            resp = engine.classify_jev(req)
+            from jevpilot_vision.drive import score_drive_request
+
+            resp = score_drive_request(engine, req)
             lat_ms = (time.perf_counter() - t0) * 1000.0
             latencies.append(lat_ms)
 

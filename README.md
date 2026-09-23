@@ -11,7 +11,7 @@
 
 **次世代語意仲裁與具身決策運行時 (Next-Generation Semantic Arbiter & Decision Runtime)**  
 *針對開源基礎模型之語意決策分支，集成「切片輸出頭 (Sliced Head)、CUDA Graphs (5.6ms) / Apple MLX (31.5ms) 雙硬體加速、黃金分割 ECE 統計校準、前綴排列去偏 (翻轉率歸零) 與 Helmholtz 自由能 100% OOD 安全護欄」之全套生產級工程架構。*  
-*以純相機像素與幾何軌跡仲裁驅動的 **JevPilot-Vision 3D 模擬器** 為具身自駕實證，並持續拓展至百人市民 Agent 模擬、AST 程式碼積木構建與雙系統高頻落地。*
+*JevPilot-Vision 是此倉中的應用：車端把畫面收成證據和選項，再交給 SemArbiter 打分。市民模擬與程式積木走同一道門，不經過相機。**
 
 > [!IMPORTANT]
 > **專案血統與定位說明 (Lineage & Attribution)**：
@@ -207,7 +207,7 @@ flowchart TD
 | **教程 09** | [動態候選空間與語意仲裁 (Sampler vs Arbiter)](docs/tutorials/09_dynamic_candidates_and_arbitration.md) | 控制物理學與語意學解耦！幾何採樣器負責車速與曲率的物理可行性，仲裁器在 8~16 條動態軌跡中挑選最優解。 |
 | **教程 10** | [Jev 與傳統分類器：為何 JevPilot 拿掉階層樹？](docs/tutorials/10_jev_vs_classifier_io.md) | 階層式（Hierarchical）硬剪枝失敗歸因！GPU 實測證實粗分類會抹殺細膩避障軌跡，Flat 仲裁才是真理。 |
 | **教程 11** | [延遲預算與狀態描述取捨 (Tradeoffs)](docs/tutorials/11_jevpilot_latency_accuracy_tradeoff.md) | 過度囉嗦的 Prompt 會撐破 CUDA Graphs 分桶！解構 compact state 與 6 欄位向量契約，平衡語意充足度與即時性。 |
-| **教程 12** | [JevPilot-Vision：從特權真值走向純像素感知](docs/tutorials/12_jevpilot_vision.md) | 徹底拋棄原版讀取遊戲記憶體的「上帝視角作弊」。引入 SigLIP 提取視覺前綴詞元，像素不進 Prompt，大模型直接看圖決策。 |
+| **教程 12** | [JevPilot-Vision：從特權真值走向純像素感知](docs/tutorials/12_jevpilot_vision.md) | 徹底拋棄原版讀取遊戲記憶體的「上帝視角作弊」。應用側 SigLIP 把畫面收成短證據；SemArbiter 只對證據和選項打分，像素不進分類器。 |
 | **教程 13** | [SemArbiter-Vision 多模態路線分析與架構抉擇](docs/tutorials/13_semif_vision_routes_and_tradeoffs.md) | 剖析擴散採樣（djev-spark）vs. 視覺前綴切片投影。雙時鐘架構（視覺感知 + 高頻物理閉環）的最優工程折衷。 |
 
 ---
@@ -219,7 +219,7 @@ flowchart TD
 ### 🎯 核心工程突破：拒絕「特權作弊數值」，擁抱「純視覺閉環」
 1. **打破 Privileged Sim Data（上帝視角作弊）**：
    - 原版 JevPilot 直接從遊戲記憶體中讀取物體絕對座標包成 JSON 餵給模型（本質上幾行 if-else 就能完成）。
-   - **JevPilot-Vision 實作純相機像素驅動**：前端 [`demo/jevpilot/semif-layer.js`](demo/jevpilot/semif-layer.js) 定期截取 Canvas 畫面，後端由 [`SigLIP`](https://huggingface.co/google/siglip-base-patch16-224) 提取 32~64 個視覺 Patch Tokens 作為視覺前綴，直接參與候選軌跡的 Sliced Head 決策！
+   - **JevPilot-Vision 實作純相機像素驅動**：前端 [`jevpilot_vision/web/semif-layer.js`](jevpilot_vision/web/semif-layer.js) 截取 Canvas 畫面。應用側 [`SigLIP`](https://huggingface.co/google/siglip-base-patch16-224) 把 JPEG 收成 `state.vision` 短證據，再連同軌跡選項呼叫 `/v1/classifier`。分類器不接收像素。
 2. **端到端實測閉環延遲預算表 (E2E Latency Budget ~80ms)**：
    - 前端畫面擷取與壓縮：~15–20 ms
    - SigLIP 視覺前綴與語意打分：~25–35 ms

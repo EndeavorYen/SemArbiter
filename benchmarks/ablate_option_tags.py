@@ -13,12 +13,12 @@ sys.path.insert(0, str(ROOT / "src"))
 
 import torch
 
-import semif_phase1.trajectory_sampler as ts
+import jevpilot_vision.trajectory_sampler as ts
 from benchmarks.benchmark_jevpilot_hierarchical import JevPilot2Simulator, evaluate_jevpilot2_mode
 from demo.server import DecisionEngine
 from semif_phase1.cuda_graph import find_bucket
 from semif_phase1.direct import encode_prompt
-from semif_phase1.trajectory_sampler import compact_jev_state, vector_option_tag
+from jevpilot_vision.trajectory_sampler import compact_jev_state, vector_option_tag
 
 
 def prompt_stats(engine: DecisionEngine, obs: dict, style: str) -> dict:

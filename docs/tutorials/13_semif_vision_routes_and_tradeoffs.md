@@ -1,6 +1,6 @@
 # 教程 13：SemIf-Vision 多模態路線分析與架構抉擇
 
-> **模組**：`src/semif_phase1/vision.py`、`src/semif_phase1/visual_prefix.py`、`demo/server.py`、`benchmarks/benchmark_jevpilot_vision.py`  
+> **模組**：`jevpilot_vision/vision.py`、`src/semif_phase1/visual_prefix.py`、`demo/server.py`、`benchmarks/benchmark_jevpilot_vision.py`  
 > **關聯 Issue**：[ #48](https://github.com/EndeavorYen/SemIf/issues/48) [ #90](https://github.com/EndeavorYen/SemIf/issues/90) 傘 [#89](https://github.com/EndeavorYen/SemIf/issues/89)（路線圖總表）  
 > **前置閱讀**：[教程 06：LM Head 投影優化](06_transformer_lm_head_optimization.md)、[教程 07：CUDA Graphs 極限延遲](07_cuda_graphs_and_compilation.md)、[教程 10：Jev vs 分類器與架構邊界](10_jev_vs_classifier_io.md)、[教程 12：JevPilot 視覺輸入](12_jevpilot_vision.md)
 
@@ -137,7 +137,7 @@ flowchart LR
     Compact --> Prompt["LLM Prompt"]
 ```
 
-- **靜態 Zero-Shot 匹配（`src/semif_phase1/vision.py`）**：  
+- **靜態 Zero-Shot 匹配（`jevpilot_vision/vision.py`）**：  
   預設定義參考 Prompt（如 `"a red traffic light facing the camera"`）。編碼器提取影像特徵與文本特徵做 Cosine Similarity 投影，輸出 0~1 的機率字典。
 - **動態時序差分與 Tau 理論（$\tau = w / \dot{w}$）**：  
   源於生物視覺認知（David Lee, 1976），老鷹捕食與人類接球時大腦並不量測絕對公尺數，而是監控視網膜物體**像素寬度的擴張速率（Rate of Optical Expansion）**：

@@ -1,6 +1,6 @@
 # 教程 11：JevPilot 延遲與正確度的取捨（壓進 512 桶）
 
-> **模組對應**：`src/semif_phase1/trajectory_sampler.py`（`compact_jev_state`、`vector_option_tag`）、`demo/server.py`、`benchmarks/profile_classify_latency.py`、`benchmarks/ablate_option_tags.py`  
+> **模組對應**：`jevpilot_vision/trajectory_sampler.py`（`compact_jev_state`、`vector_option_tag`）、`demo/server.py`、`benchmarks/profile_classify_latency.py`、`benchmarks/ablate_option_tags.py`  
 > **關聯任務**：[ #86 為何 50ms+](https://github.com/EndeavorYen/SemIf/issues/86)  
 > **前置知識**：[教程 07：CUDA Graphs](07_cuda_graphs_and_compilation.md)、[教程 09：採樣 vs 仲裁](09_dynamic_candidates_and_arbitration.md)
 

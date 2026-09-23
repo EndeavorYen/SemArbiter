@@ -16,9 +16,9 @@ from semif_phase1.latency_telemetry import (
 )
 
 REPO = Path(__file__).resolve().parent.parent
-OVERLAY_JS = REPO / "demo" / "jevpilot" / "semif-layer.js"
-TELEMETRY_JS = REPO / "demo" / "jevpilot" / "semif-telemetry.js"
-INDEX_HTML = REPO / "demo" / "jevpilot" / "index.html"
+OVERLAY_JS = REPO / "jevpilot_vision" / "web" / "semif-layer.js"
+TELEMETRY_JS = REPO / "jevpilot_vision" / "web" / "semif-telemetry.js"
+INDEX_HTML = REPO / "jevpilot_vision" / "web" / "index.html"
 VISION_BENCH = REPO / "benchmarks" / "benchmark_jevpilot_vision.py"
 
 
@@ -133,7 +133,7 @@ process.stdout.write(JSON.stringify(out));
 def test_overlay_wires_live_telemetry_hooks():
     js = OVERLAY_JS.read_text(encoding="utf-8")
     html = INDEX_HTML.read_text(encoding="utf-8")
-    css = (REPO / "demo" / "jevpilot" / "semif-layer.css").read_text(encoding="utf-8")
+    css = (REPO / "jevpilot_vision" / "web" / "semif-layer.css").read_text(encoding="utf-8")
     assert "semif-telemetry.js" in html
     assert "SEMIF_TELEMETRY" in js
     assert "recordVision" in js

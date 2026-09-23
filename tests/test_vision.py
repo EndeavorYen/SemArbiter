@@ -2,8 +2,8 @@ import pytest
 
 from benchmarks.benchmark_jevpilot_hierarchical import JevPilot2Simulator, run_jevpilot2_episode
 from demo.server import DecisionEngine
-from semif_phase1.trajectory_sampler import compact_jev_state
-from semif_phase1.vision import (
+from jevpilot_vision.trajectory_sampler import compact_jev_state
+from jevpilot_vision.vision import (
     blobs_from_frame,
     camera_event,
     compact_vision,
@@ -169,7 +169,7 @@ def test_vision_does_not_change_sampled_ids():
 
 def test_render_red_light_has_red_pixels():
     pytest.importorskip("PIL")
-    from semif_phase1.vision import render_scenario_frame
+    from jevpilot_vision.vision import render_scenario_frame
 
     img = render_scenario_frame("traffic_light_red")
     pixels = list(img.getdata())
@@ -199,8 +199,8 @@ def test_jevpilot2_clip_refuses_before_schematic_frame(monkeypatch):
         def infer_pil(self, _image):
             return {"backend": "siglip"}
 
-    monkeypatch.setattr("semif_phase1.vision.render_scenario_frame", _render)
-    monkeypatch.setattr("semif_phase1.vision.get_vision_encoder", lambda: _Encoder())
+    monkeypatch.setattr("jevpilot_vision.vision.render_scenario_frame", _render)
+    monkeypatch.setattr("jevpilot_vision.vision.get_vision_encoder", lambda: _Encoder())
     engine = DecisionEngine(use_mock=True)
     with pytest.raises(RuntimeError, match="web city"):
         run_jevpilot2_episode(

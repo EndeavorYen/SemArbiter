@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import math
 
-from semif_phase1.trajectory_sampler import STEER_LIMIT
+from jevpilot_vision.trajectory_sampler import STEER_LIMIT
 
 LATERAL_KP = 0.45  # rad per meter of lane offset
 LATERAL_KD = 0.15  # rad per m/s of offset rate

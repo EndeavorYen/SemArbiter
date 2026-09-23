@@ -37,7 +37,7 @@ from semif_phase1.control_diagnostics import (
     format_report,
     make_sample,
 )
-from semif_phase1.trajectory_sampler import compact_jev_state, vector_option_tag
+from jevpilot_vision.trajectory_sampler import compact_jev_state, vector_option_tag
 from benchmarks.benchmark_jevpilot_hierarchical import (
     ALL_SCENARIOS,
     run_jevpilot2_episode,

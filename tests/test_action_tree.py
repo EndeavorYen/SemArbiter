@@ -1,5 +1,5 @@
 from semif_phase1.action_tree import sensors_corrupt, slice_is_empty, walk_action_tree
-from demo.server import DRIVE_TREE
+from jevpilot_vision.drive import DRIVE_TREE
 
 
 def test_sensors_corrupt_ignores_null_anomaly():

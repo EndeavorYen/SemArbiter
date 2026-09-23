@@ -2,9 +2,9 @@
 
 import pytest
 
-from semif_phase1.ipm import camera_obstacles_from_blobs, ground_uv_to_ego
-from semif_phase1.trajectory_sampler import rollout, sample_trajectories
-from semif_phase1.vision import blobs_from_frame, render_scenario_frame
+from jevpilot_vision.ipm import camera_obstacles_from_blobs, ground_uv_to_ego
+from jevpilot_vision.trajectory_sampler import rollout, sample_trajectories
+from jevpilot_vision.vision import blobs_from_frame, render_scenario_frame
 
 
 def test_horizon_pixels_are_dropped():
