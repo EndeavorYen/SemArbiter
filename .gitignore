@@ -7,3 +7,4 @@ reranker-results*.jsonl
 /models/
 /cache/
 *.egg-info/
+.omc/
