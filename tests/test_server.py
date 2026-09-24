@@ -790,9 +790,12 @@ assert "/v1/vision" in paths, paths
     assert proc.returncode == 0, proc.stdout + proc.stderr
 
 
-def test_readme_names_jevpilot_as_an_application_in_this_repo():
+def test_readme_points_at_the_jevpilot_vision_repo():
     text = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-    assert "JevPilot-Vision 是此倉中的應用" in text
+    assert "https://github.com/EndeavorYen/JevPilot-Vision" in text
+    assert "裁決核心" in text
+    assert "JevPilot-Vision 是此倉中的應用" not in text
     assert "http://localhost:8000/jevpilot/" in text
-    assert '{"state":' in text or '"state":' in text
+    assert (REPO_ROOT / "jevpilot_vision" / "http.py").is_file()
+    assert (REPO_ROOT / "jevpilot_vision" / "web" / "index.html").is_file()
 
