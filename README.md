@@ -11,7 +11,7 @@
 
 **次世代語意仲裁與具身決策運行時 (Next-Generation Semantic Arbiter & Decision Runtime)**  
 *針對開源基礎模型之語意決策分支，集成「切片輸出頭 (Sliced Head)、CUDA Graphs (5.6ms) / Apple MLX (31.5ms) 雙硬體加速、黃金分割 ECE 統計校準、前綴排列去偏 (翻轉率歸零) 與 Helmholtz 自由能 100% OOD 安全護欄」之全套生產級工程架構。*  
-*JevPilot-Vision 是此倉中的應用：車端把畫面收成證據和選項，再交給 SemArbiter 打分。市民模擬與程式積木走同一道門，不經過相機。**
+*SemArbiter 是裁決核心與研究紀錄。駕駛應用的目的倉是 [JevPilot-Vision](https://github.com/EndeavorYen/JevPilot-Vision)：車端組證據和選項，再交給本倉打分。`jevpilot_vision/` 仍在此樹，搬檔不在這次分家。市民模擬與程式積木走同一道門，不經過相機。*
 
 > [!IMPORTANT]
 > **專案血統與定位說明 (Lineage & Attribution)**：
