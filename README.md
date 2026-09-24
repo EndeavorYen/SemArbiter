@@ -11,71 +11,55 @@
 
 **次世代語意仲裁與具身決策運行時 (Next-Generation Semantic Arbiter & Decision Runtime)**  
 *針對開源基礎模型之語意決策分支，集成「切片輸出頭 (Sliced Head)、CUDA Graphs (5.6ms) / Apple MLX (31.5ms) 雙硬體加速、黃金分割 ECE 統計校準、前綴排列去偏 (翻轉率歸零) 與 Helmholtz 自由能 100% OOD 安全護欄」之全套生產級工程架構。*  
-*SemArbiter 是裁決核心與研究紀錄。駕駛應用的目的倉是 [JevPilot-Vision](https://github.com/EndeavorYen/JevPilot-Vision)：車端組證據和選項，再交給本倉打分。`jevpilot_vision/` 仍在此樹，搬檔不在這次分家。市民模擬與程式積木走同一道門，不經過相機。*
+*SemArbiter 是裁決核心與研究紀錄。駕駛應用在獨立的 [JevPilot-Vision](https://github.com/EndeavorYen/JevPilot-Vision) 倉：世界、相機、SigLIP、軌跡採樣與碰撞否決都在那裡。應用把這一步的證據和選項 id 送到 `/v1/classifier`，拿回依選項 id 對齊的 choice。本倉不收像素，也不 import 應用。*
 
 > [!IMPORTANT]
 > **專案血統與定位說明 (Lineage & Attribution)**：
 > - 本專案核心決策分支技術源起於 [`TheoLeeCJ/SemIf`](https://github.com/TheoLeeCJ/SemIf)，3D 物理模擬與驅動協議靈感源自 [`standardagents/jevpilot`](https://github.com/standardagents/jevpilot) 與 [`featherless-ai/simple-jev`](https://github.com/featherless-ai/simple-jev)。我們高度致敬這些前驅專案的奠基貢獻。
-> - **SemArbiter** 在其基礎上完成了本質性的工程演進：將純文本的 Logit 讀取升級為具備微秒級硬體編譯排程、統計校準與安全護欄的通用決策內核（Decision Kernel）；並徹底打破原版 JevPilot 讀取特權記憶體的「上帝視角作弊」，改造為由 SigLIP 視覺前綴與純相機像素驅動的 **JevPilot-Vision** 真實閉環。
+> - **SemArbiter** 在其基礎上完成了本質性的工程演進：將純文本的 Logit 讀取升級為具備微秒級硬體編譯排程、統計校準與安全護欄的通用決策內核（Decision Kernel）；駕駛閉環已移至獨立應用倉 **[JevPilot-Vision](https://github.com/EndeavorYen/JevPilot-Vision)**。
 
 *Independent research project; not affiliated with Jev or TypeSafe.*
 
-**[🏎️ Launch JevPilot-Vision 3D](http://localhost:8000/jevpilot/)** · **[🚀 Run WebGPU Browser Demo](webgpu-demo/index.html)** · **[📖 Technical Tutorials (13 篇)](docs/tutorials/README.md)** · **[📊 Benchmark Results](docs/RESULTS.md)**
+**[🚀 Run WebGPU Browser Demo](webgpu-demo/index.html)** · **[📖 Technical Tutorials (8 篇)](docs/tutorials/README.md)** · **[📊 Benchmark Results](docs/RESULTS.md)** · **[🏎️ JevPilot-Vision（駕駛應用倉）](https://github.com/EndeavorYen/JevPilot-Vision)**
 
 </div>
 
 ---
 
-## 🏎️ 立即體驗：JevPilot-Vision 3D 自駕模擬器與本地決策服務
-
-體驗由本地神經模型（如 `Qwen2.5-3B-Instruct`）驅動、具備微秒級延遲的真實 3D 自駕閉環：
+## ⚡ 啟動本地決策服務
 
 ```bash
-# 1. 啟動本機 SemArbiter 決策服務 (RTX 5080 / CUDA)
+# CUDA 上跑真模型。--mock 只回第一個選項，不是模型成績。
 python demo/server.py --model Qwen/Qwen2.5-3B-Instruct --device cuda --port 8000
 ```
 
-瀏覽器開啟 **[http://localhost:8000/jevpilot/](http://localhost:8000/jevpilot/)**，即可在 **Skyline City**、**Millbrook** 與 **Interstate 08** 三大 3D 場景中，體驗由前端真實相機像素（SigLIP 視覺前綴）與動態幾何樣條軌跡驅動的 **JevPilot-Vision** 閉環自駕！
-
-### ⚡ 查詢本地分類器與語意仲裁 API
-
-相容於標準 `/v1/classifier` 協議：
+`POST /v1/classifier`（別名 `/v1/systemone`）收 `state`（這一步的證據）與 `questions.*.criteria`（這一步的選項 id）。請求裡帶影像會回 422。
 
 ```bash
-curl http://localhost:8000/v1/classifier \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "model": "SemIf/Qwen2.5-3B-Instruct",
-    "state": "Car at 65mph in center lane. Vehicle ahead is braking rapidly at 18 meters.",
+curl http://localhost:8000/v1/classifier   -H 'Content-Type: application/json'   -d '{
+    "state": {"ticket": "Customer returned an unopened item on day 12 of a 30-day window."},
     "questions": {
-      "trajectory": {
-        "type": "choice",
-        "instructions": "Select safe steering and throttle response:",
-        "criteria": {
-          "hard_brake_maintain_lane": null,
-          "swerve_left_overtake": null,
-          "maintain_speed_ahead": null
-        }
+      "refund": {
+        "instructions": "Is the refund approved?",
+        "criteria": {"approve": "Approve the refund", "deny": "Deny the refund"}
       }
     }
   }'
 ```
 
+回應依選項 id 對齊。機率是讀出結果，不是另一套策略：
+
 ```json
 {
-  "choices": {
-    "trajectory": "hard_brake_maintain_lane"
-  },
-  "probabilities": {
-    "trajectory": {
-      "hard_brake_maintain_lane": 0.892,
-      "swerve_left_overtake": 0.104,
-      "maintain_speed_ahead": 0.004
-    }
-  },
-  "latency_ms": 12.07
+  "model": "Qwen/Qwen2.5-3B-Instruct",
+  "answers": {"refund": {"choice": "approve", "probabilities": {"approve": 0.0, "deny": 0.0}}},
+  "usage": {"input_tokens": 0, "output_tokens": 0},
+  "classifier_ms": 0.0,
+  "meta": {"mock": false, "classifier_ms": 0.0}
 }
 ```
+
+上面的數字是欄位型別示意，不是量測值。
 
 ---
 
@@ -131,12 +115,10 @@ SemArbiter 在**單次前向傳播（Single Forward Pass）**的最後一個 Tok
 
 ```mermaid
 flowchart TD
-    subgraph InputStage ["1. 輸入與前綴投影"]
+    subgraph InputStage ["1. 輸入與前綴快取"]
         Prompt["結構化情境 (State & Question)"]
-        Vision["相機像素 (SigLIP / CLIP)<br/>提取 32~64 Patch Tokens"]
         KVCache["前綴快取 (KV / Prefix Cache)<br/>長狀態一次 Prefill，零代價分支"]
         Prompt --> KVCache
-        Vision -.->|Visual Prefix| KVCache
     end
 
     subgraph ComputeStage ["2. 硬體極限運算優化"]
@@ -181,7 +163,7 @@ flowchart TD
 
 ---
 
-## 📚 深入淺出：13 篇硬核工程手冊與技術實測洞察 (Technical Tutorials & Insights)
+## 📚 深入淺出：8 篇硬核工程手冊與技術實測洞察 (Technical Tutorials & Insights)
 
 本專案堅持「工程實作與科學洞察並重」。每一篇教學均記錄了真實物理機與閉環演進中的代價、底層數學推導與實戰代碼：
 
@@ -199,37 +181,15 @@ flowchart TD
 | **教程 07** | [CUDA Graphs 與極限編譯排程](docs/tutorials/07_cuda_graphs_and_compilation.md) | 消除 500 個 Kernel 發射的 CPU 驅動排隊開銷。採用階梯式形狀分桶，在 RTX 5080 上測得 5.6ms 確定性延遲。 |
 | **教程 08** | [Apple Silicon Mac mini 邊緣端部署](docs/tutorials/08_mac_silicon_and_mlx_deployment.md) | 利用 UMA 消除 PCIe 傳輸延遲。基於 Apple 原生 MLX 實現零拷貝推論，在 20W 超低功耗下達成 31.5ms 延遲。 |
 
-### 🏎️ 第二幕：具身智能與自駕物理閉環 (Act II: Embodied Control & 3D Vision)
-*從靜態文字走向 3D 世界，打破特權作弊數值，實現純視覺即時軌跡仲裁。*
-
-| 篇章 | 主題與教學連結 | 核心亮點與實測洞察 (Golden Insight) |
-| :--- | :--- | :--- |
-| **教程 09** | [動態候選空間與語意仲裁 (Sampler vs Arbiter)](docs/tutorials/09_dynamic_candidates_and_arbitration.md) | 控制物理學與語意學解耦！幾何採樣器負責車速與曲率的物理可行性，仲裁器在 8~16 條動態軌跡中挑選最優解。 |
-| **教程 10** | [Jev 與傳統分類器：為何 JevPilot 拿掉階層樹？](docs/tutorials/10_jev_vs_classifier_io.md) | 階層式（Hierarchical）硬剪枝失敗歸因！GPU 實測證實粗分類會抹殺細膩避障軌跡，Flat 仲裁才是真理。 |
-| **教程 11** | [延遲預算與狀態描述取捨 (Tradeoffs)](docs/tutorials/11_jevpilot_latency_accuracy_tradeoff.md) | 過度囉嗦的 Prompt 會撐破 CUDA Graphs 分桶！解構 compact state 與 6 欄位向量契約，平衡語意充足度與即時性。 |
-| **教程 12** | [JevPilot-Vision：從特權真值走向純像素感知](docs/tutorials/12_jevpilot_vision.md) | 徹底拋棄原版讀取遊戲記憶體的「上帝視角作弊」。應用側 SigLIP 把畫面收成短證據；SemArbiter 只對證據和選項打分，像素不進分類器。 |
-| **教程 13** | [SemArbiter-Vision 多模態路線分析與架構抉擇](docs/tutorials/13_semif_vision_routes_and_tradeoffs.md) | 剖析擴散採樣（djev-spark）vs. 視覺前綴切片投影。雙時鐘架構（視覺感知 + 高頻物理閉環）的最優工程折衷。 |
+駕駛閉環的教程（動態候選與仲裁、Jev 與分類器 I/O、延遲取捨、視覺路線、模擬測試）已隨應用移到 [JevPilot-Vision](https://github.com/EndeavorYen/JevPilot-Vision)。
 
 ---
 
-## 🏎️ JevPilot-Vision: 3D 原生無特權全場景自駕模擬器與視覺決策閉環 (Interactive 3D Vision Demo)
+## 🏎️ 駕駛閉環研究紀錄 (JevPilot-Vision)
 
-靈感源自 [`featherless-ai/simple-jev`](https://github.com/featherless-ai/simple-jev) 與 [`standardagents/jevpilot`](https://github.com/standardagents/jevpilot)，本專案已**完整移植原生 JevPilot 3D 世界**，並徹底實施了 **Vision-Native 化改造**：
+駕駛應用與它的模擬器、SigLIP、軌跡採樣器、碰撞否決和評測腳本都在 [JevPilot-Vision](https://github.com/EndeavorYen/JevPilot-Vision)。官方駕駛分數是那一倉的閉環乾淨完成率。
 
-### 🎯 核心工程突破：拒絕「特權作弊數值」，擁抱「純視覺閉環」
-1. **打破 Privileged Sim Data（上帝視角作弊）**：
-   - 原版 JevPilot 直接從遊戲記憶體中讀取物體絕對座標包成 JSON 餵給模型（本質上幾行 if-else 就能完成）。
-   - **JevPilot-Vision 實作純相機像素驅動**：前端 [`jevpilot_vision/web/semif-layer.js`](jevpilot_vision/web/semif-layer.js) 截取 Canvas 畫面。應用側 [`SigLIP`](https://huggingface.co/google/siglip-base-patch16-224) 把 JPEG 收成 `state.vision` 短證據，再連同軌跡選項呼叫 `/v1/classifier`。分類器不接收像素。
-2. **端到端實測閉環延遲預算表 (E2E Latency Budget ~80ms)**：
-   - 前端畫面擷取與壓縮：~15–20 ms
-   - SigLIP 視覺前綴與語意打分：~25–35 ms
-   - Sliced LM Head 軌跡仲裁單前向：~12–15 ms
-   - 瀏覽器網路傳輸與 HUD 刷新：~10–15 ms
-   - **總體閉環控制頻率達 12~15 Hz**，徹底打破外部對「視覺多模態無法做即時控制」的質疑。
-3. **動態樣條採樣器與 Flat 語意仲裁 (No Hierarchical Pruning)**：
-   - 採樣器依當前車速動態生成 8~16 條幾何有效軌跡；模型在 Sliced Head 單前向中同時評估，兼具車道保持與細膩緊急避障。
-4. **Helmholtz 自由能 OOD 安全護欄 (Chaos Monkey)**：
-   - 遭遇感測器毀損、NaN 數值或惡意路況時，自由能門控即時觸發警報，實現 100% 異常檢測與緊急自動煞車（AEB Fail-Safe）避險！
+下表是搬倉前在本倉量到的紀錄，保留原數字。產生它的程式在本倉最後一版是 commit `66ed9ba`，之後由應用倉維護。
 
 ### 實測閉環駕駛 Benchmark 對決 (`results/phase5-jevpilot-qwen25-3b-real-benchmark.json`)
 *在實體 RTX 5080 上針對 4 大場景（急彎、驟現障礙物、高速巡航、感測器噪聲）進行 20 回合閉環實測：*
@@ -319,6 +279,6 @@ python benchmarks/verify_published.py
 * **[`TheoLeeCJ/SemIf`](https://github.com/TheoLeeCJ/SemIf)**：最早提出透過開源語言模型 Logits 讀取直接實現結構化語意分支的概念原型。
 * **[`standardagents/jevpilot`](https://github.com/standardagents/jevpilot)** 與 **[`featherless-ai/simple-jev`](https://github.com/featherless-ai/simple-jev)**：構建了經典的 3D Driving 模擬場景基礎、軌跡採樣原型與 `/v1/classifier` 行車控制交互協議。
 * **[`mmastrac/djev-spark`](https://github.com/mmastrac/djev-spark)**：提供了以擴散模型加速視覺推論的社群探索啟發。
-* **開源基礎模型生態**：感謝 Qwen 團隊（Qwen2.5 / Qwen3.5）、Mapika（decider-2b）與 Google（SigLIP）提供的高品質開源權重。
+* **開源基礎模型生態**：感謝 Qwen 團隊（Qwen2.5 / Qwen3.5）與 Mapika（decider-2b）提供的高品質開源權重。
 
 *嚴格恪守科學可重現性規範：歷史基準資料（`results/phase1-summary.json`）具備不可篡改性，所有模型權重保留其原始授權。*

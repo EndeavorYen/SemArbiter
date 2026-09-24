@@ -92,7 +92,6 @@ def score(
     prior_logits: list[float] | None = None,
     sliced_head: bool = True,
     graph_runner: Any = None,
-    visual_prefix: Any = None,
 ) -> dict:
     import torch
     import torch.nn.functional as F
@@ -108,19 +107,7 @@ def score(
         torch.cuda.synchronize(device)
     forward_start = time.perf_counter()
     with torch.inference_mode():
-        if visual_prefix is not None:
-            from .visual_prefix import sliced_logits_with_prefix
-
-            slot_tensor = sliced_logits_with_prefix(
-                model,
-                inputs["input_ids"],
-                inputs["attention_mask"],
-                visual_prefix,
-                slots,
-            )
-            selected = slot_tensor.float().cpu().tolist()
-            readout = "visual-prefix sliced lm_head projection"
-        elif graph_runner is not None and getattr(device, "type", str(device)) == "cuda":
+        if graph_runner is not None and getattr(device, "type", str(device)) == "cuda":
             last_hidden, bucket_used, was_replayed = graph_runner.forward_hidden(ids)
             slots_tensor = torch.as_tensor(slots, dtype=torch.long, device=last_hidden.device)
             lm_head = getattr(model, "lm_head", None)
@@ -164,8 +151,7 @@ def score(
         "temperature": temperature,
         "prior_debiased": prior_logits is not None,
         "sliced_head": sliced_head,
-        "cuda_graph": graph_runner is not None and visual_prefix is None,
-        "visual_prefix_tokens": int(visual_prefix.shape[-2]) if visual_prefix is not None else 0,
+        "cuda_graph": graph_runner is not None,
         "input_tokens": len(ids),
         "forward_seconds": time.perf_counter() - forward_start,
         "total_seconds": time.perf_counter() - started,

@@ -2,7 +2,6 @@
 
 - Run commands from the repository root in an isolated environment installed with `pip install -e '.[test]'`.
 - Validate changes with `pytest -q`, `(cd results/raw && sha256sum -c SHA256SUMS)`, and `python benchmarks/verify_published.py`.
-- Control-quality observer: `python benchmarks/diagnose_control_quality.py --fast` (CPU heuristic) or `--cuda` (one GPU). `--file-issues` is off unless you pass it.
 - Benchmark outputs are create-only. Use a new output path and expose exactly one CUDA GPU per scorer process.
 - Do not change headline claims or `results/phase1-summary.json` without committing the supporting row-level evidence, regenerating the relevant raw report, updating `results/raw/SHA256SUMS`, and updating the method/results text.
 - Preserve exact model and source revisions. Use `benchmarks/fetch_sources.py` only for its listed redistributable inputs; do not commit model weights, caches, or third-party raw records.
@@ -14,19 +13,21 @@ Lead with the answer. Then say why, in short sentences. A longer sentence is fin
 
 # What this project is for
 
-This repository exists to remove failure modes of a Jev-style decision model on the path a product calls. That path is the closed-loop drive, `DecisionEngine.decide`, and `DecisionEngine._score_neural_options` behind `/v1/classifier` and `/v1/systemone`. A failure is fixed only when a test calls that live function, fails while the failure is still present, and the observable decision changes: argmax aligned by option id, abstain, or the control output.
+This repository exists to remove failure modes of a Jev-style decision model on the path a product calls. That path is `DecisionEngine.classify_jev` and `DecisionEngine._score_neural_options` behind `/v1/classifier` and `/v1/systemone`. An application sends this step's evidence and option ids. The path returns a choice aligned by option id. A failure is fixed only when a test calls that live function, fails while the failure is still present, and the observable decision changes: argmax aligned by option id, or abstain.
 
 A CLI flag, a tutorial, or a row in `docs/RESULTS.md` does not close the failure. Describe option order, calibration, confidence, abstention, or invariance as solved only when that live path runs the change at its default settings. Rewrite a claim that says otherwise. A benchmark that cannot change a live decision is not a deliverable.
 
+# Applications
+
+Applications live in their own repositories and call the door over HTTP. The driving app is [JevPilot-Vision](https://github.com/EndeavorYen/JevPilot-Vision). It owns its world, camera, SigLIP, trajectory sampling, and any veto applied after the choice. Its closed loop produces the official driving scores.
+
+This repository does not import an application, accept pixels on the door, or change a choice with an application's physics. A fix here must not assume one application's option layout, such as six-column trajectory vectors.
+
+`results/phase5-jevpilot-*.json` is the driving record from before the split. Keep those files as they are. Do not add new driving scores here.
+
 # Evaluation honesty
 
-JevPilot executors are Heuristic and Flat SemIf only. Both see the same sampled trajectories this frame. SemIf uses sliced-head readout and n-way prior. Hierarchical-as-pruning was retired for JevPilot (insight in docs/tutorials/10_jev_vs_classifier_io.md). Do not delete trajectories with a coarse tree. Constrain output schema, not the candidate set. Web and the Python loop share the option contract (no signal-injected candidates, six-column vectors, `VECTOR_INSTRUCTIONS`); they do not share a world. Official scores are the closed loop.
-
-Keep geometric slow and stop trajectories in the pool for every mode. Do not inject a stop trajectory because the light is red. Do not strip brake as an action to make Heuristic look worse.
-
-Headline driving metric is clean completion (finished with no collision, red-light, pedestrian hit, or off-track). OOD recall only counts true sensor corruption. OOD false positives must be zero. Deprecated SDI is not the ranking key.
-
-Mock code is not GPU evidence. A claim about model driving needs a CUDA run written to a new path, with `device: cuda` and no `MockDecisionEngine`.
+Mock code is not model evidence. The mock engine returns the first option. A claim about a model needs a CUDA run, or a run on the named Apple hardware, written to a new path with the device recorded and no mock engine.
 
 # How to change code
 
