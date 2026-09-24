@@ -16,10 +16,5 @@
 | **[教程 06](06_transformer_lm_head_optimization.md)** | Transformer Sliced LM Head 投影優化 | 詞表矩陣切片、RTX 5080 記憶體頻寬解耦、跳過 150k 全詞表解碼、無損等價性驗證 | [#7](https://github.com/EndeavorYen/SemIf/issues/7) |
 | **[教程 07](07_cuda_graphs_and_compilation.md)** | CUDA Graphs 與 torch.compile 極限延遲優化 | Kernel Launch 開銷消除、形狀分桶（Shape Bucketing）、RTX 5080 實測 4.6ms 延遲 | [#8](https://github.com/EndeavorYen/SemIf/issues/8) |
 | **[教程 08](08_mac_silicon_and_mlx_deployment.md)** | Apple Silicon Mac mini 邊緣端部署 | MLX 原生架構、統一記憶體（Unified Memory）零拷貝決策執行、16GB 4-bit 20W 超能效部署 | [#9](https://github.com/EndeavorYen/SemIf/issues/9) |
-| **[教程 09](09_dynamic_candidates_and_arbitration.md)** | 動態候選空間與語意仲裁（Sampler vs Arbiter） | 物理幾何採樣與語意仲裁解耦、點質量動力學 Rollout、評測誠實性規範、乾淨完成率（Clean Completion） | [#71](https://github.com/EndeavorYen/SemIf/issues/71) [#72](https://github.com/EndeavorYen/SemIf/issues/72) [#73](https://github.com/EndeavorYen/SemIf/issues/73) |
-| **[教程 10](10_jev_vs_classifier_io.md)** | Jev 與傳統分類器（輸入／輸出維度與階層樹退役實證） | Schema 約束 vs 語意解空間、Letter-slot 甜區、Hierarchical 硬剪枝失敗歸因（RTX 5080 GPU 實測）、Typed Action 契約 | [#80](https://github.com/EndeavorYen/SemIf/issues/80) [#79](https://github.com/EndeavorYen/SemIf/issues/79) |
-| **[教程 11](11_jevpilot_latency_accuracy_tradeoff.md)** | JevPilot 延遲與正確度取捨 | 3108 token 撐破 Graph 桶、compact state、words vs csv vs verbose、seed 42 閉環 A/B | [#86](https://github.com/EndeavorYen/SemIf/issues/86) |
-| **[教程 12](12_jevpilot_vision.md)** | JevPilot 視覺輸入 | Canvas → CLIP 零樣本證據 → SemIf 選本幀軌；像素不進 prompt | [#90](https://github.com/EndeavorYen/SemIf/issues/90) [#48](https://github.com/EndeavorYen/SemIf/issues/48) |
-| **[教程 13](13_semif_vision_routes_and_tradeoffs.md)** | SemIf-Vision 多模態路線分析與架構抉擇 | 幀時序事件、P0 #105+#106、P1 #108+#102、P2 #103+#107 | [#89](https://github.com/EndeavorYen/SemIf/issues/89) [#48](https://github.com/EndeavorYen/SemIf/issues/48) |
-| **[教程 14](14_simulation_testing_and_control_quality.md)** | 模擬測試（Headless SIL）設計與考量 | 感知與控制解耦、倖存者偏差、相平面特徵（Phase-Plane）、候選池覆蓋度 vs 評分失衡因果歸因 | [#117](https://github.com/EndeavorYen/SemIf/issues/117) [#118](https://github.com/EndeavorYen/SemIf/issues/118) |
 
+教程 09–14（動態候選與仲裁、Jev 與分類器 I/O、JevPilot 延遲取捨、視覺輸入、視覺路線、模擬測試）講的是駕駛閉環，已隨應用搬到 [JevPilot-Vision](https://github.com/EndeavorYen/JevPilot-Vision)。
